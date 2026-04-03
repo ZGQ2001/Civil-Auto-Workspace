@@ -1,3 +1,4 @@
 @echo off
-python 02_Core/main.py
+chcp 65001
+python "02_Core/main.py"
 pause
