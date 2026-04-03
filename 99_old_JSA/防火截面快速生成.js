@@ -1,4 +1,3 @@
-Attribute Module_Name = "Module1"
 /**
  * WPS JSA 工业极速版 - 专用于处理数万行数据
  * 核心原理：内存数组批量写入 + 延迟合并

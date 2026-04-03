@@ -1,4 +1,3 @@
-Attribute Module_Name = "Module1"
 function 高逼真手写_表格专版() {
     let sel = Application.ActiveDocument.ActiveWindow.Selection;
     

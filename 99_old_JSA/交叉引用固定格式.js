@@ -1,4 +1,3 @@
-Attribute Module_Name = "Module1"
 function 交叉引用固定格式JSA() {
     // 关闭屏幕更新以提升速度
     Application.ScreenUpdating = false;
