@@ -1,1 +1,5 @@
-03_doc/
+01_Input/
+03_Output/
+*.docx
+*.pdf
+*.jpg
