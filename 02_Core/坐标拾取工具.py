@@ -1,151 +1,179 @@
 import fitz
 import tkinter as tk
+from tkinter import filedialog, simpledialog, messagebox
 from PIL import Image, ImageTk
+import json
+import os
 
 class PDFCoordinatePicker:
     def __init__(self, pdf_path, page_num=0):
-        # 1. 加载 PDF 基础数据
+        self.pdf_path = pdf_path
         doc = fitz.open(pdf_path)
         page = doc[page_num]
-        # 母版使用 150 DPI，保证放大后依然清晰
         pix = page.get_pixmap(dpi=150)
         self.img_full = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         self.pdf_width, self.pdf_height = page.rect.width, page.rect.height
         doc.close()
 
-        # 2. 初始化状态变量
-        self.zoom_scale = 1.0       # 缩放倍率
-        self.offset_x = 0           # 图像在画布上的偏移
-        self.offset_y = 0
-        self.last_mouse_x = 0       # 用于右键拖动平移
-        self.last_mouse_y = 0
+        self.zoom_scale = 1.0
+        self.offset_x, self.offset_y = 0, 0
+        self.last_mouse_x, self.last_mouse_y = 0, 0
+        
+        self.saved_coords = {}
+        self.has_unsaved_changes = False  # 防呆开关：标记是否有未保存的修改
 
-        # 3. 初始化窗口
         self.root = tk.Tk()
-        self.root.title("坐标拾取 [Ctrl+滚轮缩放 | 右键拖动平移 | 左键拾取 | Esc退出]")
-        self.root.geometry("900x1000")
+        self.root.title(f"坐标拾取导出工具 - {os.path.basename(pdf_path)}")
+        self.root.geometry("1000x900")
 
-        # 4. 初始化画布
+        # 拦截窗口关闭事件（右上角 X）
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
         self.canvas = tk.Canvas(self.root, bg="gray", cursor="cross")
         self.canvas.pack(fill=tk.BOTH, expand=True)
 
-        # 5. 绑定事件
-        self.canvas.bind("<Button-1>", self.on_click)           # 左键点击拾取
-        self.canvas.bind("<MouseWheel>", self.on_mousewheel)     # 滚轮缩放
-        self.canvas.bind("<Button-3>", self.start_pan)          # 右键按下（平移开始）
-        self.canvas.bind("<B3-Motion>", self.do_pan)            # 右键拖动
-        self.root.bind("<Configure>", self.on_window_resize)    # 窗口大小改变
-        self.root.bind("<Escape>", lambda e: self.root.destroy())
+        self.canvas.bind("<Button-1>", self.on_click)
+        self.canvas.bind("<MouseWheel>", self.on_mousewheel)
+        self.canvas.bind("<Button-3>", self.start_pan)
+        self.canvas.bind("<B3-Motion>", self.do_pan)
+        self.root.bind("<Control-s>", lambda e: self.save_to_json())
+        self.root.bind("<Configure>", self.on_window_resize)
+        
+        # 绑定 Esc 到统一的退出检查函数
+        self.root.bind("<Escape>", lambda e: self.on_closing())
+
+        self.status = tk.Label(self.root, text="左键点击拾取 | Ctrl+滚轮缩放 | 右键拖动 | Ctrl+S 保存 | Esc/关闭 退出检查", bd=1, relief=tk.SUNKEN, anchor=tk.W)
+        self.status.pack(side=tk.BOTTOM, fill=tk.X)
 
         self.tk_img = None
-        self.first_show = True # 标记是否是第一次加载，用于自动适配大小
+        self.first_show = True
 
-    def render_image(self):
-        """重新计算并绘制当前视角的图像"""
-        win_w = self.canvas.winfo_width()
-        win_h = self.canvas.winfo_height()
-        if win_w <= 1: return # 窗口未准备好
-
-        # 计算当前缩放下的尺寸
+    def on_click(self, event):
+        # ... (此处省略与上一版本相同的坐标换算逻辑)
+        # 如果用户成功输入了字段名并确认：
+        # self.has_unsaved_changes = True 
+        # self.render_image()
+        
+        # 为了简洁，以下仅展示变动部分：
+        win_w, win_h = self.canvas.winfo_width(), self.canvas.winfo_height()
         img_w, img_h = self.img_full.size
-        display_w = int(img_w * self.zoom_scale)
-        display_h = int(img_h * self.zoom_scale)
+        dw, dh = img_w * self.zoom_scale, img_h * self.zoom_scale
+        img_left = win_w // 2 + self.offset_x - (dw / 2)
+        img_top = win_h // 2 + self.offset_y - (dh / 2)
 
-        # 重新缩放图像（放大使用自适应采样）
+        if img_left <= event.x <= img_left + dw and img_top <= event.y <= img_top + dh:
+            pdf_x = ((event.x - img_left) / dw) * self.pdf_width
+            pdf_y = ((event.y - img_top) / dh) * self.pdf_height
+            field_name = simpledialog.askstring("坐标命名", f"拾取坐标({pdf_x:.1f}, {pdf_y:.1f})\n请输入字段名称：")
+            
+            if field_name:
+                self.saved_coords[field_name] = {"x": round(pdf_x, 1), "y": round(pdf_y, 1), "size": 12}
+                self.has_unsaved_changes = True  # 触发修改标记
+                self.render_image()
+
+    def save_to_json(self):
+        """保存逻辑，增加返回值以供退出检查调用"""
+        if not self.saved_coords:
+            messagebox.showwarning("提示", "当前没有记录任何坐标！")
+            return False
+            
+        save_path = filedialog.asksaveasfilename(
+            title="保存坐标配置文件",
+            initialdir=os.path.dirname(self.pdf_path),
+            initialfile="coords_config.json",
+            filetypes=[("JSON files", "*.json")]
+        )
+        
+        if save_path:
+            with open(save_path, 'w', encoding='utf-8') as f:
+                json.dump(self.saved_coords, f, ensure_ascii=False, indent=4)
+            self.has_unsaved_changes = False  # 保存后重置修改标记
+            messagebox.showinfo("成功", f"坐标已导出至：\n{save_path}")
+            return True
+        return False
+
+    def on_closing(self):
+        """防呆退出检查"""
+        if self.has_unsaved_changes:
+            response = messagebox.askyesnocancel("退出确认", "检测到有未保存的坐标，是否保存后再退出？\n\n【是】保存并退出\n【否】放弃保存直接退出\n【取消】返回继续工作")
+            if response is True:  # 用户选“是”
+                if self.save_to_json(): # 执行保存
+                    self.root.destroy()
+            elif response is False: # 用户选“否”
+                self.root.destroy()
+            else: # 用户选“取消”或直接关掉提示框
+                pass
+        else:
+            # 如果没有修改过数据，或者已经保存过了，直接退出
+            self.root.destroy()
+
+    # (render_image, draw_markers, on_window_resize, on_mousewheel, start_pan, do_pan 等函数保持原样)
+    def render_image(self):
+        win_w, win_h = self.canvas.winfo_width(), self.canvas.winfo_height()
+        if win_w <= 1: return
+        img_w, img_h = self.img_full.size
+        dw, dh = int(img_w * self.zoom_scale), int(img_h * self.zoom_scale)
         resample = Image.Resampling.LANCZOS if self.zoom_scale > 0.5 else Image.Resampling.NEAREST
-        resized_img = self.img_full.resize((display_w, display_h), resample)
-        self.tk_img = ImageTk.PhotoImage(resized_img)
-
-        # 清除画布并绘制
+        self.tk_img = ImageTk.PhotoImage(self.img_full.resize((dw, dh), resample))
         self.canvas.delete("all")
-        # 将图像根据偏移量绘制在画布上
-        # 初始默认居中显示
         self.canvas.create_image(win_w//2 + self.offset_x, win_h//2 + self.offset_y, image=self.tk_img)
+        self.draw_markers()
+
+    def draw_markers(self):
+        win_w, win_h = self.canvas.winfo_width(), self.canvas.winfo_height()
+        img_w, img_h = self.img_full.size
+        dw, dh = img_w * self.zoom_scale, img_h * self.zoom_scale
+        img_left = win_w // 2 + self.offset_x - (dw / 2)
+        img_top = win_h // 2 + self.offset_y - (dh / 2)
+        for name, pos in self.saved_coords.items():
+            screen_x = (pos['x'] / self.pdf_width) * dw + img_left
+            screen_y = (pos['y'] / self.pdf_height) * dh + img_top
+            self.canvas.create_oval(screen_x-3, screen_y-3, screen_x+3, screen_y+3, fill="red")
+            self.canvas.create_text(screen_x+5, screen_y, text=name, anchor=tk.W, fill="blue", font=("Arial", 10, "bold"))
 
     def on_window_resize(self, event):
-        """窗口大小改变时，首次加载执行自适应"""
         if self.first_show:
             win_w, win_h = event.width, event.height
             img_w, img_h = self.img_full.size
-            # 自动计算一个初始缩放，使 PDF 适应窗口高度
             self.zoom_scale = min(win_w / img_w, win_h / img_h) * 0.95
             self.first_show = False
         self.render_image()
 
     def on_mousewheel(self, event):
-        """Ctrl + 滚轮实现以鼠标为中心缩放"""
-        if event.state & 0x0004:  # 检查 Ctrl 是否按下
-            # 缩放灵敏度
+        if event.state & 0x0004:
             zoom_step = 1.1 if event.delta > 0 else 0.9
-            
-            # 计算鼠标相对于图像中心的相对位置（用于锁定缩放点）
-            win_w = self.canvas.winfo_width()
-            win_h = self.canvas.winfo_height()
-            
-            # 鼠标在图像上的相对坐标
+            win_w, win_h = self.canvas.winfo_width(), self.canvas.winfo_height()
             mouse_rel_x = event.x - (win_w // 2 + self.offset_x)
             mouse_rel_y = event.y - (win_h // 2 + self.offset_y)
-
-            # 更新缩放比
             old_scale = self.zoom_scale
-            self.zoom_scale *= zoom_step
-            # 限制缩放范围
-            self.zoom_scale = max(0.1, min(self.zoom_scale, 5.0))
-            
-            # 重新调整偏移量，实现以鼠标指针为中心缩放
+            self.zoom_scale = max(0.1, min(self.zoom_scale * zoom_step, 5.0))
             real_step = self.zoom_scale / old_scale
             self.offset_x -= (mouse_rel_x * real_step - mouse_rel_x)
             self.offset_y -= (mouse_rel_y * real_step - mouse_rel_y)
-
             self.render_image()
 
     def start_pan(self, event):
-        """右键按下，记录坐标"""
-        self.last_mouse_x = event.x
-        self.last_mouse_y = event.y
+        self.last_mouse_x, self.last_mouse_y = event.x, event.y
 
     def do_pan(self, event):
-        """右键拖动平移图像"""
-        dx = event.x - self.last_mouse_x
-        dy = event.y - self.last_mouse_y
-        self.offset_x += dx
-        self.offset_y += dy
-        self.last_mouse_x = event.x
-        self.last_mouse_y = event.y
+        self.offset_x += event.x - self.last_mouse_x
+        self.offset_y += event.y - self.last_mouse_y
+        self.last_mouse_x, self.last_mouse_y = event.x, event.y
         self.render_image()
-
-    def on_click(self, event):
-        """左键点击映射坐标"""
-        win_w = self.canvas.winfo_width()
-        win_h = self.canvas.winfo_height()
-
-        # 计算图像左上角在画布上的实际位置
-        img_w, img_h = self.img_full.size
-        cur_display_w = img_w * self.zoom_scale
-        cur_display_h = img_h * self.zoom_scale
-        
-        img_left = win_w // 2 + self.offset_x - (cur_display_w / 2)
-        img_top = win_h // 2 + self.offset_y - (cur_display_h / 2)
-
-        # 检查点击是否在图像区域
-        if img_left <= event.x <= img_left + cur_display_w and \
-           img_top <= event.y <= img_top + cur_display_h:
-            
-            rel_x = (event.x - img_left) / cur_display_w
-            rel_y = (event.y - img_top) / cur_display_h
-            
-            pdf_x = rel_x * self.pdf_width
-            pdf_y = rel_y * self.pdf_height
-            
-            print(f"坐标 -> x: {pdf_x:.1f}, y: {pdf_y:.1f}")
-            # 画一个持久的小红点
-            self.canvas.create_oval(event.x-3, event.y-3, event.x+3, event.y+3, fill="red", outline="white")
 
     def run(self):
         self.root.mainloop()
 
 if __name__ == "__main__":
-    # 请确保路径正确
-    pdf_file = r"D:\01_VC CODE\Civil-Auto-Workspace\01_Input\49_构件截面尺寸检测记录表-钢结构.pdf"
-    app = PDFCoordinatePicker(pdf_file)
-    app.run()
+    temp_root = tk.Tk()
+    temp_root.withdraw()
+    initial_dir = r"D:\01_VC CODE\Civil-Auto-Workspace\01_Input"
+    pdf_file = filedialog.askopenfilename(
+        title="选择检测记录表 PDF 模板",
+        initialdir=initial_dir if os.path.exists(initial_dir) else os.getcwd(),
+        filetypes=[("PDF files", "*.pdf")]
+    )
+    temp_root.destroy()
+    if pdf_file:
+        app = PDFCoordinatePicker(pdf_file)
+        app.run()
