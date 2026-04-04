@@ -95,7 +95,7 @@
             "left_indent_pt": 0.0, "first_line_indent_pt": 0.0
         },
         "无缩进正文": {
-            "_comment": "鉴定依据列表，悬挂缩进标准（左缩进1.06cm，悬挂0.74cm）",
+            "_comment": "鉴定依据列表, 悬挂缩进标准 (左缩进1.06cm, 悬挂0.74cm) ",
             "chinese_font": "仿宋", "english_font": "Times New Roman", "font_size": 12.0, "bold": false,
             "alignment": 3, "space_before": 0.0, "space_after": 0.0, "line_spacing_rule": 1,
             "outline_level": 10, "first_line_indent": 0.0, "right_indent": 0.0,
