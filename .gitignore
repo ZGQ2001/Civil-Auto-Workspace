@@ -1,6 +1,5 @@
 01_Input/
 03_Output/
-__pycache__/
-*.docx
+02_Core/__pycache__/
 *.pdf
 *.jpg
