@@ -5,24 +5,36 @@
 功能概述：
     本脚本用于自动化处理 Word/WPS 检测报告中的表格及表名排版。
     V2.0 重构版：全面接入 report_style_config.json，解除字体字号硬编码。
+
+    这个脚本可以自动排版Word文档中的所有表格，包括设置字体、字号、对齐方式、表格宽度等。
+    它会根据配置文件自动应用统一的格式，确保表格看起来专业一致。新手可以通过简单的选择来完成复杂的表格排版。
 ===============================================================================
 """
-import tkinter as tk
-from tkinter import simpledialog, messagebox, ttk
-import os
-import sys
-import json
-import re
-import win32com.client
-import pythoncom
+import tkinter as tk  # GUI库
+from tkinter import simpledialog, messagebox, ttk  # tkinter子模块
+import os  # 文件路径操作
+import sys  # 系统操作
+import json  # JSON文件处理
+import re  # 正则表达式（虽然在这个文件中可能没用，但保留）
+import win32com.client  # 控制Word/WPS
+import pythoncom  # COM组件初始化
 
 # 挂载外部模块备份文件
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from file_utils_backup import backup_current_document
+from file_utils_backup import backup_current_document  # 导入备份函数
 
 # ---------------- 1. 配置与规则读取 ----------------
 
 def load_style_config(report_type="检测报告"):
+    """
+    加载样式配置文件。
+
+    参数:
+        report_type (str): 报告类型。
+
+    返回:
+        dict: 样式配置字典。
+    """
     config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '04_Config', 'report_style_config.json'))
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"【阻断】未找到配置文件：{config_path}")
@@ -33,26 +45,51 @@ def load_style_config(report_type="检测报告"):
     return full_config[report_type]
 
 class GlobalConfig:
+    """
+    全局配置类。
+
+    存储用户选择的配置参数。
+    """
     def __init__(self):
-        self.report_type = "检测报告"
-        self.table_width_percent = 100
-        self.skip_pages = []
-        self.empty_cell_color = 255 
+        self.report_type = "检测报告"  # 报告类型
+        self.table_width_percent = 100  # 表格宽度百分比
+        self.skip_pages = []  # 跳过页码列表
+        self.empty_cell_color = 255  # 空单元格颜色
 
 class AuditLog:
+    """
+    审计日志类。
+
+    记录处理过程中的统计信息和错误详情。
+    """
     def __init__(self):
-        self.total = 0
-        self.success = 0
-        self.skipped = 0
-        self.errors = 0
-        self.empty_cells = []
-        self.error_details = []
+        self.total = 0  # 总表格数
+        self.success = 0  # 成功处理的表格数
+        self.skipped = 0  # 跳过的表格数
+        self.errors = 0  # 错误数
+        self.empty_cells = []  # 空单元格列表
+        self.error_details = []  # 错误详情列表
+
+# 全局实例
+config = GlobalConfig()
+audit_log = AuditLog()
 
 config = GlobalConfig()
 audit_log = AuditLog()
 
 # ---------------- 2. 交互模块 (UI) ----------------
 def show_ui_and_get_params(file_name):
+    """
+    显示用户界面并获取参数。
+
+    通过弹窗让用户选择报告类型、表格宽度和跳过页码。
+
+    参数:
+        file_name (str): 当前文件名。
+
+    返回:
+        bool: 是否成功获取参数。
+    """
     root = tk.Tk()
     root.withdraw()
     root.attributes('-topmost', True) 
@@ -71,13 +108,22 @@ def show_ui_and_get_params(file_name):
     # 3/3：跳过页码
     skip_input = simpledialog.askstring("3/3", f"{prompt_base}跳过页码(如封面、资质等)：\n页码间用逗号分隔，例如：1,2,3", initialvalue="", parent=root)
     if skip_input and skip_input.strip():
-        normalized = skip_input.replace("，", ",")
+        normalized = skip_input.replace("，", ",")  # 支持中文逗号
         config.skip_pages = [int(p.strip()) for p in normalized.split(",") if p.strip().isdigit()]
 
     root.destroy()
     return True
 
 def final_check_summary(file_name):
+    """
+    显示最终确认摘要。
+
+    参数:
+        file_name (str): 文件名。
+
+    返回:
+        bool: 用户是否确认。
+    """
     root = tk.Tk()
     root.withdraw()
     root.attributes('-topmost', True)
@@ -97,12 +143,30 @@ def final_check_summary(file_name):
 
 # ---------------- 3. 核心引擎 (COM) ----------------
 def get_word_app():
-    try: return win32com.client.GetActiveObject("Word.Application")
+    """
+    获取Word应用程序对象。
+
+    返回:
+        Word应用程序对象或None。
+    """
+    try: 
+        return win32com.client.GetActiveObject("Word.Application")
     except:
-        try: return win32com.client.GetActiveObject("KWPS.Application")
-        except: return None
+        try: 
+            return win32com.client.GetActiveObject("KWPS.Application")
+        except: 
+            return None
 
 def process_all_tables(app):
+    """
+    处理文档中的所有表格。
+
+    参数:
+        app: Word应用程序对象。
+
+    返回:
+        bool: 处理是否成功。
+    """
     try:
         # 读取 JSON 数据源
         style_db = load_style_config(config.report_type)
@@ -134,16 +198,16 @@ def process_all_tables(app):
         for i in range(1, table_count + 1):
             tbl = tables.Item(i)
             try:
-                orig_page = tbl.Range.Information(3)
+                orig_page = tbl.Range.Information(3)  # 获取表格所在页码
             except:
                 orig_page = 0
             table_queue.append({
-                "obj": tbl,
-                "orig_page": orig_page,
-                "index": i
+                "obj": tbl,  # 表格对象
+                "orig_page": orig_page,  # 原始页码
+                "index": i  # 表格索引
             })
 
-        app.ScreenUpdating = False
+        app.ScreenUpdating = False  # 关闭屏幕更新以提高速度
         
         # 执行循环
         for item in table_queue:
@@ -166,8 +230,12 @@ def process_all_tables(app):
                     title_range = tbl.Range.Previous(4, 1)
                     if title_range and re.sub(r'[\s\x07]', '', title_range.Text).startswith("表"):
                         tf = title_range.Font
-                        tf.Name = title_cfg["english_font"]
+                        # 严谨的字体注入逻辑
+                        eng_font = title_cfg["english_font"]
+                        tf.Name = eng_font
+                        tf.NameAscii = eng_font
                         tf.NameFarEast = title_cfg["chinese_font"]
+                        
                         tf.Size = title_cfg["font_size"]
                         tf.Bold = title_cfg.get("bold", False)
                         
@@ -196,8 +264,12 @@ def process_all_tables(app):
                         audit_log.empty_cells.append(f"P{page_num}-T{idx}-C{j}")
                     else:
                         f = cell.Range.Font
-                        f.Name = cell_cfg["english_font"]
+                        # 严谨的字体注入逻辑
+                        eng_font = cell_cfg["english_font"]
+                        f.Name = eng_font
+                        f.NameAscii = eng_font
                         f.NameFarEast = cell_cfg["chinese_font"]
+                        
                         f.Size = cell_cfg["font_size"]
                         f.Bold = cell_cfg.get("bold", False)
                         
