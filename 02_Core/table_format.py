@@ -1,10 +1,39 @@
+"""
+===============================================================================
+脚本名称：报告表格全量排版引擎 (table_format.py)
+作者: ZGQ
+功能概述：
+    本脚本用于自动化处理 Word/WPS 检测报告中的表格及表名排版，解决手动调表耗时且易错的问题。
+
+核心工作流：
+    1. 环境检测：抓取当前处于激活状态的 Word/WPS 文档。
+    2. 参数配置：通过 Tkinter 弹窗获取排版参数（字体、字号、表格宽度、跳过页码等）。
+    3. 安全备份：调用外部模块 `file_utils.py` 进行静默落盘备份。
+    4. 预先扫描：锁定所有表格的初始物理页码，防止排版过程中的动态位移导致误判。
+    5. 全量排版：
+        - 表名识别：精准捕捉表格上方以“表”开头的段落，并应用字体与间距。
+        - 表格处理：统一中英文字体、字号、宽度 100% / 95% 居中对齐。
+        - 空值标记：将未填数据的单元格底纹标红，记录三维坐标（页码-表号-单元格）。
+    6. 结果汇总：展示处理总数、标红空值明细，完成排版闭环。
+
+前置依赖：
+    - 运行前必须打开目标文档。
+    - 同级目录下需存在 `file_utils.py` 模块。
+===============================================================================
+"""
 import tkinter as tk
 from tkinter import simpledialog, messagebox, ttk
 import os
+import sys
 import time
 import re
 import win32com.client
 import pythoncom
+
+# 【挂载外部模块备份文件】
+# 确保程序能准确找到同在 02_Core 目录下的 file_utils.py
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from file_utils import backup_current_document
 
 # ---------------- 1. 配置与审计对象 ----------------
 class GlobalConfig:
@@ -16,7 +45,6 @@ class GlobalConfig:
         self.skip_pages = []
         self.empty_cell_color = 255 
         self.max_table_threshold = 100
-        self.backup_suffix = "_备份_"
         self.title_format = {"align": 1, "space_before": 0.5, "space_after": 0}
 
 class AuditLog:
@@ -57,10 +85,9 @@ def show_ui_and_get_params(file_name):
     if not width_input: return False
     config.table_width_percent = int(width_input)
 
-    # 4/5：跳过页码 (修复点：支持所有中英文逗号、空格)
+    # 4/5：跳过页码
     skip_input = simpledialog.askstring("4/5", f"{prompt_base}跳过页码(中英逗号均可)：", initialvalue="4", parent=root)
     if skip_input and skip_input.strip():
-        # 统一替换掉中文逗号
         normalized = skip_input.replace("，", ",")
         config.skip_pages = [int(p.strip()) for p in normalized.split(",") if p.strip().isdigit()]
 
@@ -86,7 +113,7 @@ def final_check_summary(file_name):
         f"表名间距: {config.title_format['space_before']} 行\n"
         f"跳过页码: {config.skip_pages if config.skip_pages else '无'}\n"
         "--------------------------\n"
-        "确认执行后，将锁定初始页码并开始排版。"
+        "确认执行后，将调用静默备份并开始排版。"
     )
     confirm = messagebox.askyesno("请最终确认配置清单", summary, parent=root)
     root.destroy()
@@ -99,18 +126,6 @@ def get_word_app():
         try: return win32com.client.GetActiveObject("KWPS.Application")
         except: return None
 
-def backup_document(app):
-    try:
-        doc = app.ActiveDocument
-        if not doc.FullName or doc.FullName == doc.Name: return False
-        doc.Save()
-        base, ext = os.path.splitext(doc.FullName)
-        new_path = os.path.abspath(f"{base}{config.backup_suffix}{int(time.time())}{ext}")
-        backup_doc = app.Documents.Add(Template=doc.FullName)
-        backup_doc.SaveAs2(new_path)
-        backup_doc.Close(0)
-        return True
-    except: return False
 
 def process_all_tables(app):
     try:
@@ -132,12 +147,10 @@ def process_all_tables(app):
         bar.pack(pady=10)
         pg_root.update()
 
-        # 【核心策略：预扫描】
-        # 在处理前先固定所有表格的初始页码，防止排版后页码位移导致的误判
+        # 预扫描
         table_queue = []
         for i in range(1, table_count + 1):
             tbl = tables.Item(i)
-            # 记录初始状态：表格对象 + 初始物理页码
             table_queue.append({
                 "obj": tbl,
                 "orig_page": tbl.Range.Information(3),
@@ -146,36 +159,33 @@ def process_all_tables(app):
 
         app.ScreenUpdating = False
         
-        # 【执行循环】
+        # 执行循环
         for item in table_queue:
             tbl = item["obj"]
             page_num = item["orig_page"]
             idx = item["index"]
             
-            # 更新进度
             percent = int((idx / table_count) * 100)
             bar['value'] = idx
             progress_label.config(text=f"正在排版: {idx}/{table_count} (初始页码:{page_num})")
             pg_root.update()
 
             try:
-                # A. 表名判定与【全属性同步】
+                # A. 表名判定
                 try:
                     title_range = tbl.Range.Previous(4, 1)
                     if title_range and re.sub(r'[\s\x07]', '', title_range.Text).startswith("表"):
-                        # 1. 字体属性强制同步
                         tf = title_range.Font
                         tf.Name = config.english_font
                         tf.NameFarEast = config.chinese_font
                         tf.Size = config.font_size
-                        # 2. 段落属性同步
                         pf = title_range.ParagraphFormat
                         pf.Alignment = config.title_format["align"]
                         pf.LineUnitBefore = config.title_format["space_before"]
                         pf.LineUnitAfter = 0
                 except: pass
 
-                # B. 跳过页码判定 (使用预扫描的 orig_page)
+                # B. 跳过页码
                 if page_num in config.skip_pages:
                     audit_log.skipped += 1
                     continue
@@ -223,7 +233,12 @@ if __name__ == "__main__":
     else:
         current_file = word_app.ActiveDocument.Name
         if show_ui_and_get_params(current_file) and final_check_summary(current_file):
-            if backup_document(word_app):
+            
+            # 【标注 3：调用外部备份模块并增加熔断机制】
+            print("正在调用外部模块进行静默备份...")
+            if backup_current_document(word_app):
+                
+                # 备份成功，放行排版逻辑
                 if process_all_tables(word_app):
                     empty_info = "\n".join(audit_log.empty_cells[:15])
                     if len(audit_log.empty_cells) > 15:
@@ -236,3 +251,14 @@ if __name__ == "__main__":
                         f"📍 坐标参考（锁定初始位置）：\n{empty_info if audit_log.empty_cells else '无'}"
                     )
                     messagebox.showinfo("执行流转完成", result_msg)
+            else:
+                # 备份失败，UI 拦截（因为底层模块现在是静默的）
+                err_root = tk.Tk()
+                err_root.withdraw()
+                err_root.attributes('-topmost', True)
+                messagebox.showerror(
+                    "安全熔断", 
+                    "⚠️ 备份模块(file_utils)返回失败信号！\n\n为防止原文件损坏，排版程序已自动终止。\n请检查当前文档是否已保存，或查看后台报错日志。", 
+                    parent=err_root
+                )
+                err_root.destroy()

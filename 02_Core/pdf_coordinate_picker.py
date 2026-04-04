@@ -1,3 +1,22 @@
+"""
+===============================================================================
+脚本名称：PDF坐标拾取工具 (pdf_coordinate_picker.py)
+作者: ZGQ
+功能概述：
+    本脚本用于处理 PDF 文件中的坐标拾取和标记，提供一个可视化界面让用户点击 PDF 上的任意位置，输入字段名称，并将坐标以 JSON 格式导出，方便后续自动化排版等应用。
+
+核心工作流：
+    1. 环境检测：抓取当前处于激活状态的 PDF 文档。
+    2. 可视化界面：使用 Tkinter 创建一个窗口显示 PDF 的第一页，支持缩放和平移。
+    3. 坐标拾取：用户左键点击 PDF 上的任意位置，弹出输入框让用户为该坐标命名，并记录坐标的 PDF 内部位置。
+    4. 数据管理：用户可以随时保存已拾取的坐标到 JSON 文件，程序会提示未保存的修改，防止数据丢失。
+    5. 结果汇总：展示已拾取坐标的列表，完成坐标拾取闭环。
+
+前置依赖：
+    - 运行前必须选择一个 PDF 文件。
+    - 需要安装 fitz（PyMuPDF）和 Pillow 库。
+===============================================================================
+"""
 import fitz
 import tkinter as tk
 from tkinter import filedialog, simpledialog, messagebox
@@ -49,7 +68,7 @@ class PDFCoordinatePicker:
         self.first_show = True
 
     def on_click(self, event):
-        # ... (此处省略与上一版本相同的坐标换算逻辑)
+        # (此处省略坐标换算逻辑)
         # 如果用户成功输入了字段名并确认：
         # self.has_unsaved_changes = True 
         # self.render_image()

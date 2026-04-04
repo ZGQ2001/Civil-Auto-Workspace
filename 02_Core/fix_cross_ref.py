@@ -1,5 +1,31 @@
+"""
+===============================================================================
+脚本名称：修复交叉引用格式 (fix_cross_ref.py)
+作者: ZGQ
+功能概述：
+    本脚本用于自动化处理 Word/WPS 检测报告中的交叉引用格式，
+    解决手动调整耗时且易漏项的问题，保证每次的格式一致性。
+
+核心工作流：
+    1. 环境检测：抓取当前处于激活状态的 Word/WPS 文档。
+    2. 遍历所有域代码, 定位交叉引用 (REF 域) 。
+    3. 检查每个交叉引用是否已包含保留格式的开关 (\* MERGEFORMAT) 。
+    4. 对于缺失该开关的交叉引用，自动追加 \* MERGEFORMAT 开关以确保格式稳定。
+    5. 结果汇总：展示处理总数，完成修复闭环
+
+前置依赖：
+    - 运行前必须打开目标文档。
+    - 同级目录下需存在 `file_utils.py` 模块。
+===============================================================================
+"""
+import os
+import sys
 import win32com.client
 import pythoncom
+
+# 【挂载外部模块备份文件】
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from file_utils import backup_current_document
 
 def update_cross_references():
     """
