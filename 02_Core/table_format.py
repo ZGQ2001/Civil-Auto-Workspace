@@ -18,7 +18,7 @@
 
 前置依赖：
     - 运行前必须打开目标文档。
-    - 同级目录下需存在 `file_utils.py` 模块。
+    - 同级目录下需存在 `file_utils_backup.py` 模块。
 ===============================================================================
 """
 import tkinter as tk
@@ -31,9 +31,9 @@ import win32com.client
 import pythoncom
 
 # 【挂载外部模块备份文件】
-# 确保程序能准确找到同在 02_Core 目录下的 file_utils.py
+# 确保程序能准确找到同在 02_Core 目录下的 file_utils_backup.py
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from file_utils import backup_current_document
+from file_utils_backup import backup_current_document
 
 # ---------------- 1. 配置与审计对象 ----------------
 class GlobalConfig:
