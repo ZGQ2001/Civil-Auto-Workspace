@@ -363,6 +363,7 @@ def process_document_body(app, params):
     app.ScreenUpdating = False 
     success_count = 0  # 成功处理的段落数
     skipped_count = 0  # 跳过的段落数
+    manual_list_skip_count = 0  # 手动列表计数器
     # 模式标志，用于跟踪上下文
     note_mode = basis_mode = conclusion_mode = False 
     
@@ -430,9 +431,18 @@ def process_document_body(app, params):
             elif para_type not in ["表注说明_延续", "空行"]:
                 note_mode = False
                 
-            # 跳过已经是列表项的标准正文
-            if para_type == "标准正文" and re.match(r'^(\d+[.、）\)]|[①②③④⑤⑥⑦⑧⑨⑩])', text.strip()):
-                continue
+            # 拦截并标红已经是列表项的标准正文
+            if para_type == "标准正文":
+                # 识别手动序号：(1)、①、1. 等
+                if re.match(r'^(\d+[.、）\)]|[①②③④⑤⑥⑦⑧⑨⑩])', text.strip()):
+                    manual_list_skip_count += 1
+                    try:
+                        # 将跳过的段落字体设为红色 (255)
+                        para.Range.Font.Color = 255 
+                    except:
+                        pass
+                    continue # 跳过，保留原缩进
+            # --------------------------------
                 
             # 将符号列表转换为无缩进正文
             if para_type == "标准正文" and re.match(r'^[\s]*[•\-*]\s+', text.strip()):
@@ -449,7 +459,7 @@ def process_document_body(app, params):
             pg_root.destroy()
         app.ScreenUpdating = True 
         
-    return success_count, skipped_count
+    return success_count, skipped_count, manual_list_skip_count
 
 
 # ==================== 最终主控流 ====================
@@ -499,7 +509,7 @@ if __name__ == "__main__":
                 # 调用备份函数
                 if backup_current_document(app):
                     # 执行正文排版
-                    succ_cnt, skip_cnt = process_document_body(app, run_params)
+                    succ_cnt, skip_cnt, manual_cnt = process_document_body(app, run_params)
                     
                     # 显示完成信息
                     root = tk.Tk()
@@ -508,9 +518,10 @@ if __name__ == "__main__":
                     messagebox.showinfo(
                         "执行完毕", 
                         f"✅ 正文排版任务完成！\n\n"
-                        f"处理报告类型：{run_params['report_type']}\n"
-                        f"成功刷入格式：{succ_cnt} 段\n"
-                        f"因规则或页码跳过：{skip_cnt} 段"
+                        f"1. 成功刷入格式：{succ_cnt} 段\n"
+                        f"2. 标红待核列表：{manual_cnt} 段\n"
+                        f"3. 规则/页码跳过：{skip_cnt} 段\n\n"
+                        f"提示：文档中红色段落已自动跳过排版，请人工核对。"
                     )
                     root.destroy()
                 else:
