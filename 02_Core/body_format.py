@@ -4,7 +4,7 @@
 作者：ZGQ
 功能概述：
     基于外部 JSON 配置和正则表达式，对 Word 文档的非结构化正文进行特征识别与精准排版。
-    已集成：交互选择、防呆确认、可视化进度白盒、物理页码隔离、图表格式强保护、防御性兜底。
+    V2.0 重构版：引擎纯粹化，解除代码硬编码，全量依赖 JSON 数据驱动。
 ===============================================================================
 """
 
@@ -79,7 +79,6 @@ class ParagraphClassifier:
             if self.re_h2.match(clean_text): return "二级标题"
             if self.re_h1.match(clean_text): return "一级标题"
             
-            # 【核心修正1】：将无缩进特征放开给检测报告，识别《XX标准》
             if is_in_basis_mode: return "无缩进正文"
             if self.re_no_indent.match(clean_text): return "无缩进正文"
             
@@ -140,76 +139,45 @@ def final_check_summary(file_name, params):
 
 def apply_paragraph_format(para, style_config, para_type):
     try:
-        if para_type == "图片":
-            pf = para.Format
-            pf.Alignment = style_config.get("alignment", 1) 
-            pf.SpaceBefore = style_config.get("space_before", 0.5) * 12
-            pf.SpaceAfter = style_config.get("space_after", 0.5) * 12
-            pf.LineSpacingRule = 0  
-            pf.CharacterUnitFirstLineIndent = 0
-            pf.FirstLineIndent = 0
-            pf.LeftIndent = 0
-            return
-
-        # 具备高容错度的配置读取，防止 JSON 漏配属性
+        # 基础字体格式映射
         f = para.Range.Font
         f.NameFarEast = style_config.get("chinese_font", "宋体") 
         f.Name = style_config.get("english_font", "Times New Roman") 
         f.Size = style_config.get("font_size", 12.0) 
         f.Bold = style_config.get("bold", False) 
 
+        # 对齐与大纲映射
         pf = para.Format
         pf.Alignment = style_config.get("alignment", 3) 
-        
-        # 【核心修正2】：智能推测大纲级别，无视 JSON 是否漏填 outline_level，保障导航目录存活
-        outline_lvl = style_config.get("outline_level", 10)
-        if "一级标题" in para_type or "结论一级标题" in para_type: outline_lvl = 1
-        elif "二级标题" in para_type or "结论二级标题" in para_type: outline_lvl = 2
-        elif "三级标题" in para_type: outline_lvl = 3
-        pf.OutlineLevel = outline_lvl 
-
+        pf.OutlineLevel = style_config.get("outline_level", 10) 
         pf.SpaceBefore = style_config.get("space_before", 0) * 12  
         pf.SpaceAfter = style_config.get("space_after", 0) * 12
 
-        if para_type == "图表名称":
-            pf.SpaceAfter = 0
-            pf.LineSpacingRule = 0 
-            pf.CharacterUnitFirstLineIndent = 0
-            pf.FirstLineIndent = 0
-            pf.CharacterUnitLeftIndent = 0
-            pf.LeftIndent = 0
-            pf.DisableLineHeightGrid = False
+        # 行距控制逻辑
+        ls_rule = style_config.get("line_spacing_rule", 5)
+        if ls_rule == 1: pf.LineSpacingRule = 1
+        elif ls_rule == 0: pf.LineSpacingRule = 0
         else:
-            ls_rule = style_config.get("line_spacing_rule", 5)
-            if ls_rule == 1: pf.LineSpacingRule = 1
-            elif ls_rule == 0: pf.LineSpacingRule = 0
-            else:
-                pf.LineSpacingRule = 5
-                pf.LineSpacing = style_config.get("line_spacing", 1.5) * 12
-            
-            pf.DisableLineHeightGrid = False
-            
-            if "first_line_indent" in style_config:
-                pf.CharacterUnitFirstLineIndent = style_config["first_line_indent"]
-                if style_config["first_line_indent"] == 0:
-                    pf.FirstLineIndent = 0
-            else:
-                pf.CharacterUnitFirstLineIndent = 0
-                pf.FirstLineIndent = 0
-
-            if "right_indent" in style_config:
-                pf.CharacterUnitRightIndent = style_config["right_indent"]
-                
-            if para_type in ["一级标题", "二级标题", "三级标题", "结论一级标题", "结论二级标题"]:
-                pf.CharacterUnitLeftIndent = 0
-                pf.LeftIndent = 0 
-                pf.CharacterUnitFirstLineIndent = 0
-                pf.FirstLineIndent = 0 
-            elif para_type == "无缩进正文":
-                pf.CharacterUnitLeftIndent = 0
-                pf.CharacterUnitFirstLineIndent = 0
-                pf.LeftIndent = 30.05
-                pf.FirstLineIndent = -20.98
+            pf.LineSpacingRule = 5
+            pf.LineSpacing = style_config.get("line_spacing", 1.5) * 12
+        pf.DisableLineHeightGrid = False
+        
+        # 相对缩进控制逻辑
+        pf.CharacterUnitRightIndent = style_config.get("right_indent", 0)
+        char_first = style_config.get("first_line_indent", 0)
+        pf.CharacterUnitFirstLineIndent = char_first
+        
+        # 绝对位移清零（防御 Word 底层项目符号/列表引发的幽灵位移）
+        if char_first == 0:
+            pf.FirstLineIndent = 0  
+        pf.CharacterUnitLeftIndent = 0
+        pf.LeftIndent = 0  
+        
+        # 绝对磅值覆写（响应特定排版卡片的悬挂缩进标准）
+        if style_config.get("left_indent_pt", 0) != 0:
+            pf.LeftIndent = style_config["left_indent_pt"]
+        if style_config.get("first_line_indent_pt", 0) != 0:
+            pf.FirstLineIndent = style_config["first_line_indent_pt"]
                 
     except Exception as e:
         pass
@@ -303,18 +271,8 @@ def process_document_body(app, params):
             if para_type == "标准正文" and re.match(r'^[\s]*[•\-*]\s+', text.strip()):
                 para_type = "无缩进正文"
                 
-            # 【核心修正3】：当 JSON 未配置特定板块时，启动兜底容错排版
             if para_type in full_config:
                 apply_paragraph_format(para, full_config[para_type], para_type)
-                success_count += 1
-            elif para_type in ["图片", "图表名称", "无缩进正文", "空白提示"]:
-                fallback_cfg = {
-                    "chinese_font": "宋体", "english_font": "Times New Roman", 
-                    "font_size": 10.5 if para_type == "图表名称" else 12.0, 
-                    "alignment": 1 if para_type in ["图片", "图表名称"] else 0,
-                    "first_line_indent": 0
-                }
-                apply_paragraph_format(para, fallback_cfg, para_type)
                 success_count += 1
 
     finally:
