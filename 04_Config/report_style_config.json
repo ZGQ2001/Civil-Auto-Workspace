@@ -37,5 +37,35 @@
             "line_spacing_rule": 1,
             "first_line_indent": 2.0
         }
+    },
+    "鉴定报告": {
+        "结论一级标题": {
+            "_comment": "检测结论与建议：仿宋小三，加粗，居中，段前段后1行，单倍行距，大纲1级",
+            "chinese_font": "仿宋", "english_font": "Times New Roman", "font_size": 15.0, "bold": true, "alignment": 1, "space_before": 1.0, "space_after": 1.0, "line_spacing_rule": 0, "outline_level": 1
+        },
+        "结论二级标题": {
+            "_comment": "1. 结构布置检测结果：仿宋四号，加粗，两端对齐，段前段后0行，1.5倍行距，大纲2级",
+            "chinese_font": "仿宋", "english_font": "Times New Roman", "font_size": 14.0, "bold": true, "alignment": 3, "space_before": 0.0, "space_after": 0.0, "line_spacing_rule": 1, "outline_level": 2
+        },
+        "一级标题": {
+            "_comment": "三、检测鉴定依据和设备：仿宋小三，加粗，左对齐，段前段后1行，单倍行距，大纲1级",
+            "chinese_font": "仿宋", "english_font": "Times New Roman", "font_size": 15.0, "bold": true, "alignment": 0, "space_before": 1.0, "space_after": 1.0, "line_spacing_rule": 0, "outline_level": 1
+        },
+        "二级标题": {
+            "_comment": "3.1 检测依据：仿宋四号，加粗，左对齐，段前段后1行，1.5倍行距，大纲2级",
+            "chinese_font": "仿宋", "english_font": "Times New Roman", "font_size": 14.0, "bold": true, "alignment": 0, "space_before": 1.0, "space_after": 1.0, "line_spacing_rule": 1, "outline_level": 2
+        },
+        "三级标题": {
+            "_comment": "4.6.1 刚架梁：仿宋小四，加粗，左对齐，段前1行段后0.5行，单倍行距，大纲3级",
+            "chinese_font": "仿宋", "english_font": "Times New Roman", "font_size": 12.0, "bold": true, "alignment": 0, "space_before": 1.0, "space_after": 0.5, "line_spacing_rule": 0, "outline_level": 3
+        },
+        "标准正文": {
+            "_comment": "通用正文：仿宋小四，不加粗，两端对齐，段前段后0，1.5倍行距，首行缩进2字符",
+            "chinese_font": "仿宋", "english_font": "Times New Roman", "font_size": 12.0, "bold": false, "alignment": 3, "space_before": 0.0, "space_after": 0.0, "line_spacing_rule": 1, "first_line_indent": 2.0, "outline_level": 10
+        },
+        "无缩进正文": { "_comment": "给检测/鉴定依据列表用", "chinese_font": "仿宋", "english_font": "Times New Roman", "font_size": 12.0, "bold": false, "alignment": 0, "space_before": 0.0, "space_after": 0.0, "line_spacing_rule": 1, "first_line_indent": 0.0, "outline_level": 10 },
+        "空白提示": { "_comment": "本页以下空白", "chinese_font": "仿宋", "english_font": "Times New Roman", "font_size": 12.0, "bold": true, "alignment": 0, "space_before": 0.0, "space_after": 0.0, "line_spacing_rule": 1, "first_line_indent": 0.0, "outline_level": 10 },
+        "图片": { "_comment": "包含图片的段落，强制居中","chinese_font": "仿宋", "english_font": "Times New Roman", "font_size": 10.5, "bold": false, "alignment": 1, "space_before": 0.5, "space_after": 0.5, "line_spacing_rule": 0, "first_line_indent": 0.0, "outline_level": 10 },
+        "图表名称": { "_comment": "图名表名，强制居中","chinese_font": "仿宋", "english_font": "Times New Roman", "font_size": 10.5, "bold": false, "alignment": 1, "space_before": 0.5, "space_after": 0.0, "line_spacing_rule": 0, "outline_level": 10 }
     }
 }
