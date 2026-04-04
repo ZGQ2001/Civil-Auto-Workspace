@@ -15,7 +15,7 @@
 
 前置依赖：
     - 运行前必须打开目标文档。
-    - 同级目录下需存在 `file_utils.py` 模块。
+    - 同级目录下需存在 `file_utils_backup.py` 模块。
 ===============================================================================
 """
 import os
@@ -25,7 +25,7 @@ import pythoncom
 
 # 【挂载外部模块备份文件】
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from file_utils import backup_current_document
+from file_utils_backup import backup_current_document
 
 def update_cross_references():
     """
