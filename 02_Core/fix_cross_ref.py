@@ -21,6 +21,8 @@
     - 同级目录下需存在 `file_utils_backup.py` 模块。
 ===============================================================================
 """
+import tkinter as tk
+from tkinter import messagebox
 import os  # 用于路径操作
 import sys  # 用于添加模块路径
 import win32com.client  # 用于控制Word/WPS
@@ -46,8 +48,12 @@ def update_cross_references():
             # 备用方案：显式寻找WPS进程
             app = win32com.client.GetActiveObject("KWPS.Application")
         except pythoncom.com_error:
-            print("【阻断】未能检测到正在运行的 Word/WPS 进程。请先打开一份报告。")
-            return  # 如果都找不到，退出函数
+            err_root = tk.Tk()
+            err_root.withdraw()
+            err_root.attributes('-topmost', True)
+            messagebox.showerror("运行阻断", "未检测到运行中的 WPS 或 Word 程序。\n\n请先打开需要修复的报告文档！", parent=err_root)
+            err_root.destroy()
+            return  # 阻断退出
 
     try:
         # 关闭屏幕更新以提高处理速度
@@ -72,11 +78,20 @@ def update_cross_references():
                     f.Code.Text = code_text + " \\* MERGEFORMAT"
                     count += 1  # 计数器加1
                     
-        print(f"【成功】处理完毕！共为 {count} 个交叉引用追加了保留格式开关。")
+        # 成功反馈弹窗
+        succ_root = tk.Tk()
+        succ_root.withdraw()
+        succ_root.attributes('-topmost', True)
+        messagebox.showinfo("执行完毕", f"✅ 交叉引用修复完毕！\n\n共为 {count} 个交叉引用追加了保留格式开关。", parent=succ_root)
+        succ_root.destroy()
 
     except Exception as e:
-        # 如果出现异常，打印错误信息
-        print(f"【异常】执行过程中出错: {e}")
+        # 异常拦截弹窗
+        err_root = tk.Tk()
+        err_root.withdraw()
+        err_root.attributes('-topmost', True)
+        messagebox.showerror("运行期错误", f"执行过程中出错:\n{e}", parent=err_root)
+        err_root.destroy()
     finally:
         # 无论成功还是失败，都要恢复屏幕更新，防止文档卡死
         app.ScreenUpdating = True

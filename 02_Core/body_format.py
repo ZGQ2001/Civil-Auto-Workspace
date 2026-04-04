@@ -471,11 +471,21 @@ if __name__ == "__main__":
             app = None  # 都没有找到
 
     if not app:
-        # 如果没有找到应用程序，显示错误信息
-        print("【阻断】未检测到运行中的 WPS/Word。")
+        err_root = tk.Tk()
+        err_root.withdraw()
+        err_root.attributes('-topmost', True)
+        messagebox.showerror("运行阻断", "未检测到运行中的 WPS 或 Word 程序。\n\n请先打开需要排版的报告文档！", parent=err_root)
+        err_root.destroy()
     else:
-        # 获取当前活动文档的文件名
-        current_file = app.ActiveDocument.Name
+        # 隐患拦截：拦截未保存的新建文档，防止静默备份引发异常
+        if app.ActiveDocument.Path == "":
+            err_root = tk.Tk()
+            err_root.withdraw()
+            err_root.attributes('-topmost', True)
+            messagebox.showwarning("操作阻断", "该文档尚未保存到本地硬盘。\n请先手动保存一次（Ctrl+S）后再执行排版引擎！", parent=err_root)
+            err_root.destroy()
+        else:
+            current_file = app.ActiveDocument.Name
         # 获取用户输入的参数
         run_params = get_user_params(current_file)
         

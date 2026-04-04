@@ -145,7 +145,11 @@ if __name__ == "__main__":
             app = None
 
     if not app:
-        print("【阻断】未检测到运行中的 WPS/Word。")
+        err_root = tk.Tk()
+        err_root.withdraw()
+        err_root.attributes('-topmost', True)
+        messagebox.showerror("运行阻断", "未检测到运行中的 WPS 或 Word 程序。\n\n请先打开需要处理的报告文档！", parent=err_root)
+        err_root.destroy()
     else:
         # 隐患拦截：拦截未保存的新建文档，防止静默备份引发异常
         if app.ActiveDocument.Path == "":
