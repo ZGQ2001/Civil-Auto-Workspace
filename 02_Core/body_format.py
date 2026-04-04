@@ -4,7 +4,7 @@
 作者：ZGQ
 功能概述：
     基于外部 JSON 配置和正则表达式，对 Word 文档的非结构化正文进行特征识别与精准排版。
-    已集成：交互选择、防呆确认、可视化进度白盒、物理页码隔离、图表格式强保护。
+    已集成：交互选择、防呆确认、可视化进度白盒、物理页码隔离、图表格式强保护、防御性兜底。
 ===============================================================================
 """
 
@@ -46,7 +46,7 @@ class ParagraphClassifier:
         self.re_h3 = re.compile(r'^\d+[\.．]\d+[\.．]\d+[\s\u3000\t]*')
         self.re_appr_c_h1 = re.compile(r'^[检\s·]*测[\s·]*结[\s·]*论[\s·]*与[\s·]*建[\s·]*议$')
         self.re_appr_c_h2 = re.compile(r'^\d+[\.．\s\u3000\t]+[\u4e00-\u9fa5]+')
-        self.re_basis_title = re.compile(r'^(\d+[\.\s\u3000\t]*)*(检测|鉴定)依据.*') 
+        self.re_basis_title = re.compile(r'^[\d\.．\s\u3000\t]*(检测|鉴定)依据.*') 
         self.re_suggest_title = re.compile(r'^[处\s]*理[\s]*建[\s]*议$')
 
     def classify(self, text, list_string="", is_in_note_mode=False, is_in_basis_mode=False, is_in_conclusion_mode=False, report_type="检测报告"):
@@ -78,21 +78,22 @@ class ParagraphClassifier:
             if self.re_h3.match(clean_text): return "三级标题"
             if self.re_h2.match(clean_text): return "二级标题"
             if self.re_h1.match(clean_text): return "一级标题"
+            
+            # 【核心修正1】：将无缩进特征放开给检测报告，识别《XX标准》
+            if is_in_basis_mode: return "无缩进正文"
+            if self.re_no_indent.match(clean_text): return "无缩进正文"
+            
             return "标准正文"
 
 
 # ==================== 板块 2：交互与参数获取 (UI) ====================
 
 def get_user_params(file_name):
-    """
-    弹窗获取运行参数：报告类型、跳过页码
-    """
     root = tk.Tk()
     root.withdraw()
     root.attributes('-topmost', True)
     prompt_base = f"当前排版文件：{file_name}\n\n"
 
-    # 1/2：报告类型选择
     type_input = simpledialog.askstring(
         "1/2", 
         f"{prompt_base}请选择处理的报告类型：\n1 - 检测报告\n2 - 鉴定报告", 
@@ -102,7 +103,6 @@ def get_user_params(file_name):
     if not type_input: return None
     report_type = "鉴定报告" if type_input == "2" else "检测报告"
 
-    # 2/2：跳过页码设置
     skip_input = simpledialog.askstring(
         "2/2", 
         f"{prompt_base}请输入需要跳过的页码（如封面、资质、目录等）：\n页码间用逗号分隔，例如：1,2,3\n若无跳过页，直接点确定。", 
@@ -117,15 +117,9 @@ def get_user_params(file_name):
         skip_pages = [int(p.strip()) for p in normalized.split(",") if p.strip().isdigit()]
         
     root.destroy()
-    return {
-        "report_type": report_type,
-        "skip_pages": skip_pages
-    }
+    return {"report_type": report_type, "skip_pages": skip_pages}
 
 def final_check_summary(file_name, params):
-    """
-    执行前防呆确认弹窗
-    """
     root = tk.Tk()
     root.withdraw()
     root.attributes('-topmost', True)
@@ -146,7 +140,6 @@ def final_check_summary(file_name, params):
 
 def apply_paragraph_format(para, style_config, para_type):
     try:
-        # 图片物理隔离拦截
         if para_type == "图片":
             pf = para.Format
             pf.Alignment = style_config.get("alignment", 1) 
@@ -158,22 +151,29 @@ def apply_paragraph_format(para, style_config, para_type):
             pf.LeftIndent = 0
             return
 
+        # 具备高容错度的配置读取，防止 JSON 漏配属性
         f = para.Range.Font
-        f.NameFarEast = style_config["chinese_font"] 
-        f.Name = style_config["english_font"] 
-        f.Size = style_config["font_size"] 
+        f.NameFarEast = style_config.get("chinese_font", "宋体") 
+        f.Name = style_config.get("english_font", "Times New Roman") 
+        f.Size = style_config.get("font_size", 12.0) 
         f.Bold = style_config.get("bold", False) 
 
         pf = para.Format
-        pf.Alignment = style_config["alignment"] 
-        pf.OutlineLevel = style_config.get("outline_level", 10) 
+        pf.Alignment = style_config.get("alignment", 3) 
+        
+        # 【核心修正2】：智能推测大纲级别，无视 JSON 是否漏填 outline_level，保障导航目录存活
+        outline_lvl = style_config.get("outline_level", 10)
+        if "一级标题" in para_type or "结论一级标题" in para_type: outline_lvl = 1
+        elif "二级标题" in para_type or "结论二级标题" in para_type: outline_lvl = 2
+        elif "三级标题" in para_type: outline_lvl = 3
+        pf.OutlineLevel = outline_lvl 
+
         pf.SpaceBefore = style_config.get("space_before", 0) * 12  
         pf.SpaceAfter = style_config.get("space_after", 0) * 12
 
-        # 强保护：图表名称彻底斩断 1.5倍行距和缩进
         if para_type == "图表名称":
             pf.SpaceAfter = 0
-            pf.LineSpacingRule = 0  # 强制单倍行距
+            pf.LineSpacingRule = 0 
             pf.CharacterUnitFirstLineIndent = 0
             pf.FirstLineIndent = 0
             pf.CharacterUnitLeftIndent = 0
@@ -189,7 +189,6 @@ def apply_paragraph_format(para, style_config, para_type):
             
             pf.DisableLineHeightGrid = False
             
-            # ---------------- 缩进处理 ----------------
             if "first_line_indent" in style_config:
                 pf.CharacterUnitFirstLineIndent = style_config["first_line_indent"]
                 if style_config["first_line_indent"] == 0:
@@ -201,21 +200,16 @@ def apply_paragraph_format(para, style_config, para_type):
             if "right_indent" in style_config:
                 pf.CharacterUnitRightIndent = style_config["right_indent"]
                 
-            # 1. 对各级标题，继续执行“双重清零”（标题绝不能有悬挂缩进）
             if para_type in ["一级标题", "二级标题", "三级标题", "结论一级标题", "结论二级标题"]:
-                pf.CharacterUnitLeftIndent = 0      
-                pf.LeftIndent = 0                   
-                pf.CharacterUnitFirstLineIndent = 0 
-                pf.FirstLineIndent = 0              
-
-            # 2. 【公司标准定制】：依据列表（无缩进正文）专属排版
+                pf.CharacterUnitLeftIndent = 0
+                pf.LeftIndent = 0 
+                pf.CharacterUnitFirstLineIndent = 0
+                pf.FirstLineIndent = 0 
             elif para_type == "无缩进正文":
                 pf.CharacterUnitLeftIndent = 0
                 pf.CharacterUnitFirstLineIndent = 0
-                # 严格匹配：文本前0.32厘米 + 悬挂0.74厘米
-                pf.LeftIndent = 30.05         # 1.06 厘米 * 28.35 
-                pf.FirstLineIndent = -20.98   # -0.74 厘米 * 28.35
-            # --------------------------------------------------
+                pf.LeftIndent = 30.05
+                pf.FirstLineIndent = -20.98
                 
     except Exception as e:
         pass
@@ -232,7 +226,6 @@ def process_document_body(app, params):
     paragraphs = doc.Paragraphs
     total_paras = paragraphs.Count 
     
-    # --- 白盒机制：视觉进度条初始化 ---
     pg_root = tk.Tk()
     pg_root.title("正文自动排版程序")
     pg_root.attributes('-topmost', True)
@@ -250,9 +243,7 @@ def process_document_body(app, params):
     note_mode = basis_mode = conclusion_mode = False 
     
     try:
-        # 直接从第1段开始全局遍历
         for i in range(1, total_paras + 1):
-            # 刷新 UI 进度（为提高性能，每处理 10 段或者在最后刷新一次 UI）
             if i % 10 == 0 or i == total_paras:
                 bar['value'] = i
                 progress_label.config(text=f"正在排版: {i}/{total_paras} 段")
@@ -260,16 +251,14 @@ def process_document_body(app, params):
                 
             para = paragraphs.Item(i)
             
-            # 物理页码隔离机制
             try:
-                page_num = para.Range.Information(3)  # wdActiveEndPageNumber = 3
+                page_num = para.Range.Information(3) 
                 if page_num in skip_pages:
                     skipped_count += 1
                     continue
             except:
                 pass 
 
-            # 跳过表格内段落和目录页
             if para.Range.Information(12) or "目录" in para.Style.NameLocal or "TOC" in para.Style.NameLocal:
                 skipped_count += 1
                 continue
@@ -314,8 +303,18 @@ def process_document_body(app, params):
             if para_type == "标准正文" and re.match(r'^[\s]*[•\-*]\s+', text.strip()):
                 para_type = "无缩进正文"
                 
+            # 【核心修正3】：当 JSON 未配置特定板块时，启动兜底容错排版
             if para_type in full_config:
                 apply_paragraph_format(para, full_config[para_type], para_type)
+                success_count += 1
+            elif para_type in ["图片", "图表名称", "无缩进正文", "空白提示"]:
+                fallback_cfg = {
+                    "chinese_font": "宋体", "english_font": "Times New Roman", 
+                    "font_size": 10.5 if para_type == "图表名称" else 12.0, 
+                    "alignment": 1 if para_type in ["图片", "图表名称"] else 0,
+                    "first_line_indent": 0
+                }
+                apply_paragraph_format(para, fallback_cfg, para_type)
                 success_count += 1
 
     finally:
@@ -341,20 +340,16 @@ if __name__ == "__main__":
         print("【阻断】未检测到运行中的 WPS/Word。")
     else:
         current_file = app.ActiveDocument.Name
-        # 1. 弹窗获取运行参数
         run_params = get_user_params(current_file)
         
         if run_params is None:
             print("【取消】用户取消了操作，程序终止。")
         else:
-            # 2. 防呆确认机制
             if final_check_summary(current_file, run_params):
                 print("正在调用外部模块进行静默备份...")
                 if backup_current_document(app):
-                    # 3. 执行正文全量排版
                     succ_cnt, skip_cnt = process_document_body(app, run_params)
                     
-                    # 4. 执行完成结果汇总
                     root = tk.Tk()
                     root.withdraw()
                     root.attributes('-topmost', True)
@@ -367,7 +362,6 @@ if __name__ == "__main__":
                     )
                     root.destroy()
                 else:
-                    # 备份失败异常处理
                     err_root = tk.Tk()
                     err_root.withdraw()
                     err_root.attributes('-topmost', True)
