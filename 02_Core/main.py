@@ -46,7 +46,7 @@ class MainDashboard:
             ("报告表格排版引擎", "table_format.py"),
             ("全局括号半全角纠偏", "bracket_format.py"),
             ("交叉引用格式修复", "fix_cross_ref.py"),
-            ("Word转PDF与合并工具", "word2pdf.py"),
+            ("文档转换小工具", "word2pdf.py"),
         ]
 
         # 循环生成启动按钮

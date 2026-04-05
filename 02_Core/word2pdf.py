@@ -29,7 +29,9 @@ import win32com.client  # 导入 pywin32 的客户端模块，用于调用 Windo
 import threading  # 导入多线程模块，用于将耗时操作与 GUI 界面分离，防止界面假死
 import pythoncom  # 导入 Python 的 COM 基础组件，用于在子线程中初始化和释放 COM 环境
 import time  # 导入时间模块，用于在引擎崩溃重启时提供缓冲等待时间
+import random # 用于后续手写扰动
 from pypdf import PdfWriter  # 从 pypdf 库导入 PdfWriter 类，专门用于在内存中执行 PDF 拼接和写入
+import fitz  # 必须执行 uv pip install pymupdf 才能使用这个库进行 PDF 渲染和图片生成
 
 # ==================== 2. 主程序类定义 ====================
 class EngineeringDocTool:
@@ -53,6 +55,10 @@ class EngineeringDocTool:
         self.word_files = []  # 初始化空列表，存储待转换的 Word 文件的绝对路径
         self.word_output_folder = ""  # 初始化空字符串，存储 Word 转换后 PDF 的输出目录路径
         self.pdf_files = []  # 初始化空列表，存储待合并的 PDF 文件的绝对路径
+        self.png_files = []  # 新增：存放待转图片的文档
+        self.png_output_folder = ""  # 新增：存放生成的底图路径
+        self.png_files = [] 
+        self.png_output_folder = ""
         
         self.setup_ui()  # 调用界面初始化方法，开始绘制所有 UI 元素
 
@@ -70,14 +76,17 @@ class EngineeringDocTool:
         # 3.2 创建具体的选项卡页面
         self.tab_word2pdf = ttk.Frame(self.notebook)  # 创建第一个 Frame 框架，用于装载 Word 转 PDF 功能的 UI
         self.tab_pdfmerge = ttk.Frame(self.notebook)  # 创建第二个 Frame 框架，用于装载 PDF 合并功能的 UI
+        self.tab_topng = ttk.Frame(self.notebook)
 
         # 将这两个 Frame 添加到 Notebook 容器中，并设置顶部显示的标签文本
         self.notebook.add(self.tab_word2pdf, text="功能一: Word 批量转 PDF")
         self.notebook.add(self.tab_pdfmerge, text="功能二: PDF 自定义合并")
+        self.notebook.add(self.tab_topng, text="功能三: 文档转高清图片 (PNG)")
 
         # 分别调用两个独立的方法，向这两个空白选项卡中填充具体的按钮和列表
         self.build_word2pdf_tab()
         self.build_pdfmerge_tab()
+        self.build_topng_tab() # 调用新 UI 构建方法 
 
         # 3.3 创建底部的全局运行日志区域
         frame_log = tk.LabelFrame(self.root, text="系统运行日志")  # 创建带有边框和标题的 LabelFrame 容器
@@ -358,6 +367,118 @@ class EngineeringDocTool:
             merger.close()  # 无论成功失败，显式关闭合并器实例释放内存流
             # 使用 after 方法指挥主线程将按钮解禁
             self.root.after(0, lambda: self.btn_start_merge.config(state='normal'))
+    # ==================== 功能三：文档转 PNG (底图制作) ====================
+    def build_topng_tab(self):
+        # 1. 文件列表区域
+        frame_list = tk.Frame(self.tab_topng)
+        frame_list.pack(pady=10, padx=10, fill=tk.X)
+        tk.Label(frame_list, text="待处理文档 (PDF/Word):").pack(anchor=tk.W)
+        self.listbox_png = tk.Listbox(frame_list, height=6)
+        self.listbox_png.pack(fill=tk.X, pady=5)
+        
+        btn_frame = tk.Frame(frame_list)
+        btn_frame.pack(fill=tk.X)
+        tk.Button(btn_frame, text="添加文件", command=self.add_png_files).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="清空列表", command=self.clear_png_files).pack(side=tk.LEFT, padx=5)
+
+        # 2. 输出路径设置区域
+        frame_out = tk.Frame(self.tab_topng)
+        frame_out.pack(pady=10, padx=10, fill=tk.X)
+        tk.Label(frame_out, text="PNG 图片输出文件夹:").pack(anchor=tk.W)
+        self.entry_png_out = tk.Entry(frame_out, state='readonly')
+        self.entry_png_out.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        tk.Button(frame_out, text="选择路径", command=self.set_png_output).pack(side=tk.RIGHT)
+
+        # 3. 转换配置 (DPI)
+        frame_cfg = tk.LabelFrame(self.tab_topng, text="转换配置")
+        frame_cfg.pack(pady=10, padx=10, fill=tk.X)
+        tk.Label(frame_cfg, text="采样率 (DPI):").pack(side=tk.LEFT, padx=5)
+        self.combo_dpi = ttk.Combobox(frame_cfg, values=[150, 300, 600], width=5)
+        self.combo_dpi.set(300)
+        self.combo_dpi.pack(side=tk.LEFT, padx=5)
+        tk.Label(frame_cfg, text=" (建议 300 用于打印，600 用于极其精细的表格)", font=("微软雅黑", 9, "italic")).pack(side=tk.LEFT)
+
+        self.btn_start_png = tk.Button(self.tab_topng, text="批量生成底图", command=self.start_png_conversion, bg="#90ee90")
+        self.btn_start_png.pack(pady=20, ipadx=40, ipady=8)
+
+    def add_png_files(self):
+        files = filedialog.askopenfilenames(title="选择文档", filetypes=[("文档文件", "*.pdf;*.doc;*.docx")])
+        for f in files:
+            path = os.path.abspath(f)
+            if path not in self.png_files:
+                self.png_files.append(path)
+                self.listbox_png.insert(tk.END, os.path.basename(path))
+
+    def clear_png_files(self):
+        self.png_files.clear()
+        self.listbox_png.delete(0, tk.END)
+
+    def set_png_output(self):
+        folder = filedialog.askdirectory(title="选择图片保存文件夹")
+        if folder:
+            self.png_output_folder = folder
+            self.entry_png_out.config(state='normal')
+            self.entry_png_out.delete(0, tk.END)
+            self.entry_png_out.insert(0, folder)
+            self.entry_png_out.config(state='readonly')
+
+    def start_png_conversion(self):
+        if not self.png_files or not self.png_output_folder:
+            messagebox.showwarning("提示", "请选择文件及输出路径")
+            return
+        self.btn_start_png.config(state='disabled')
+        self.log("--- 启动文档转高清底图任务 ---")
+        threading.Thread(target=self.process_png_conversion, daemon=True).start()
+
+    def process_png_conversion(self):
+        pythoncom.CoInitialize()
+        word_engine = None
+        dpi = int(self.combo_dpi.get())
+        mat = fitz.Matrix(dpi/72, dpi/72) # 计算 PDF 到 PNG 的缩放倍数
+
+        try:
+            for input_path in self.png_files:
+                ext = os.path.splitext(input_path)[1].lower()
+                out_dir = self.png_output_folder
+                if not os.path.exists(out_dir): os.makedirs(out_dir)
+
+                target_pdf = input_path
+                is_temp_pdf = False
+
+                # 如果是 Word，先复用你的功能一引擎转成临时 PDF
+                if ext in ['.doc', '.docx']:
+                    self.log(f"预处理 Word: {os.path.basename(input_path)}")
+                    if not word_engine:
+                        word_engine, name = self.mount_engine()
+                        self.log(f"已挂载 {name} 执行后台渲染...")
+                    
+                    target_pdf = os.path.join(out_dir, "temp_render.pdf")
+                    doc = word_engine.Documents.Open(input_path, ReadOnly=1, Visible=False)
+                    doc.SaveAs(os.path.abspath(target_pdf), FileFormat=17)
+                    doc.Close(0)
+                    is_temp_pdf = True
+
+                # 调用 PyMuPDF 将 PDF 的每一页撕成 PNG
+                self.log(f"渲染高清底图: {os.path.basename(input_path)}")
+                doc_pdf = fitz.open(target_pdf)
+                for i in range(len(doc_pdf)):
+                    page = doc_pdf.load_page(i)
+                    pix = page.get_pixmap(matrix=mat, alpha=False)
+                    img_name = f"{os.path.splitext(os.path.basename(input_path))[0]}_P{i+1}.png"
+                    pix.save(os.path.join(out_dir, img_name))
+                doc_pdf.close()
+
+                # 清理临时文件
+                if is_temp_pdf and os.path.exists(target_pdf):
+                    os.remove(target_pdf)
+
+            self.log(f"--- 转换结束 | 图片已存至: {self.png_output_folder} ---")
+        except Exception as e:
+            self.log(f"异常退出: {str(e)}")
+        finally:
+            if word_engine: self.kill_engine(word_engine)
+            pythoncom.CoUninitialize()
+            self.root.after(0, lambda: self.btn_start_png.config(state='normal'))
 
 # ==================== 6. 脚本入口点 ====================
 # 当文件作为独立脚本被执行时，执行以下块内的代码
