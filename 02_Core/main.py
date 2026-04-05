@@ -16,7 +16,7 @@ import customtkinter as ctk
 class MainDashboard:
     def __init__(self, root):
         self.root = root
-        self.root.title("工程自动化程序 V2.0")
+        self.root.title("工程自动化程序 V0.1.0")
         self.root.geometry("450x520")
         self.root.resizable(False, False)
         
