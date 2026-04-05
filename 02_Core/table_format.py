@@ -18,6 +18,7 @@ import json  # JSON文件处理
 import re  # 正则表达式（虽然在这个文件中可能没用，但保留）
 import win32com.client  # 控制Word/WPS
 import pythoncom  # COM组件初始化
+from word_env_utils import word_optimized_environment  # Word环境优化上下文管理器
 
 # 挂载外部模块备份文件
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -185,110 +186,122 @@ def process_all_tables(app):
         pg_root = tk.Tk()
         pg_root.title("表格自动排版程序")
         pg_root.attributes('-topmost', True)
-        pg_root.geometry("350x120")
+        pg_root.geometry("350x160")  # 加高窗口
         tk.Label(pg_root, text=f"正在处理：{doc.Name}", fg="blue").pack(pady=5)
-        progress_label = tk.Label(pg_root, text="锁定初始位置中...")
+        progress_label = tk.Label(pg_root, text="准备排版...")
         progress_label.pack()
         bar = ttk.Progressbar(pg_root, length=280, mode='determinate', maximum=table_count)
         bar.pack(pady=10)
-        pg_root.update()
 
-        # 预扫描
-        table_queue = []
-        for i in range(1, table_count + 1):
-            tbl = tables.Item(i)
-            try:
-                orig_page = tbl.Range.Information(3)  # 获取表格所在页码
-            except:
-                orig_page = 0
-            table_queue.append({
-                "obj": tbl,  # 表格对象
-                "orig_page": orig_page,  # 原始页码
-                "index": i  # 表格索引
-            })
-
-        app.ScreenUpdating = False  # 关闭屏幕更新以提高速度
-        
-        # 执行循环
-        for item in table_queue:
-            tbl = item["obj"]
-            page_num = item["orig_page"]
-            idx = item["index"]
-            
-            bar['value'] = idx
-            progress_label.config(text=f"正在排版: {idx}/{table_count} (初始页码:{page_num})")
+        # 【新增】紧急停止机制
+        cancel_flag = {"is_cancelled": False}
+        def stop_process():
+            cancel_flag["is_cancelled"] = True
+            progress_label.config(text="正在安全中止，请稍候...", fg="red")
             pg_root.update()
 
-            try:
-                # B. 跳过页码
-                if page_num in config.skip_pages:
-                    audit_log.skipped += 1
-                    continue
+        tk.Button(pg_root, text="紧急停止", command=stop_process, fg="red", width=10).pack()
+        pg_root.protocol("WM_DELETE_WINDOW", stop_process)
+        pg_root.update()
 
-                # A. 表名判定与 JSON 规则下发
-                try:
-                    title_range = tbl.Range.Previous(4, 1)
-                    if title_range and re.sub(r'[\s\x07]', '', title_range.Text).startswith("表"):
-                        tf = title_range.Font
-                        # 严谨的字体注入逻辑
-                        eng_font = title_cfg["english_font"]
-                        tf.Name = eng_font
-                        tf.NameAscii = eng_font
-                        tf.NameFarEast = title_cfg["chinese_font"]
-                        
-                        tf.Size = title_cfg["font_size"]
-                        tf.Bold = title_cfg.get("bold", False)
-                        
-                        pf = title_range.ParagraphFormat
-                        pf.Alignment = title_cfg.get("alignment", 1)
-                        pf.LineUnitBefore = title_cfg.get("space_before", 0.5)
-                        pf.LineUnitAfter = title_cfg.get("space_after", 0.0)
-                        pf.CharacterUnitFirstLineIndent = 0
-                        pf.FirstLineIndent = 0
-                        pf.CharacterUnitLeftIndent = 0
-                        pf.LeftIndent = 0
-                except: pass
-
-                # C. 表格整体格式
-                tbl.PreferredWidthType = 2
-                tbl.PreferredWidth = config.table_width_percent
-                tbl.Rows.Alignment = 1
-
-                # D. 单元格一维遍历与 JSON 规则下发
-                cells = tbl.Range.Cells
-                for j in range(1, cells.Count + 1):
-                    cell = cells.Item(j)
-                    clean_text = re.sub(r'[\r\n\x07\s]', '', cell.Range.Text)
-                    if not clean_text:
-                        cell.Shading.BackgroundPatternColor = config.empty_cell_color
-                        audit_log.empty_cells.append(f"P{page_num}-T{idx}-C{j}")
-                    else:
-                        f = cell.Range.Font
-                        # 严谨的字体注入逻辑
-                        eng_font = cell_cfg["english_font"]
-                        f.Name = eng_font
-                        f.NameAscii = eng_font
-                        f.NameFarEast = cell_cfg["chinese_font"]
-                        
-                        f.Size = cell_cfg["font_size"]
-                        f.Bold = cell_cfg.get("bold", False)
-                        
-                        cell.VerticalAlignment = 1
-                        cell.Range.ParagraphFormat.Alignment = cell_cfg.get("alignment", 1)
+        # 调用上下文管理器接管环境
+        with word_optimized_environment(app):
+        
+            # 【提速 2】直接使用 enumerate 迭代，废除极慢的预扫描队列
+            for idx, tbl in enumerate(tables, 1):
+                # 监听停止信号
                 
-                audit_log.success += 1
-            except Exception as e:
-                audit_log.errors += 1
-                audit_log.error_details.append(f"T{idx} 崩溃: {e}")
+                # 监听停止信号
+                if cancel_flag["is_cancelled"]:
+                    print("【中断】用户手动终止了表格排版。")
+                    break
 
-        pg_root.destroy()
-        doc.Save()
-        app.ScreenUpdating = True
-        return True
+                # 更新UI
+                if pg_root.winfo_exists():
+                    bar['value'] = idx
+                    progress_label.config(text=f"正在排版: {idx}/{table_count}")
+                    pg_root.update()
+
+                try:
+                    # 【提速 3】只有用户填了跳过页，才去算极度耗时的页码
+                    page_num = 0
+                    if config.skip_pages:
+                        try:
+                            page_num = tbl.Range.Information(3)
+                        except:
+                            pass
+                            
+                    # B. 跳过页码判定
+                    if page_num in config.skip_pages:
+                        audit_log.skipped += 1
+                        continue
+
+                    # A. 表名判定与 JSON 规则下发
+                    try:
+                        title_range = tbl.Range.Previous(4, 1)
+                        if title_range and re.sub(r'[\s\x07]', '', title_range.Text).startswith("表"):
+                            tf = title_range.Font
+                            # 严谨的字体注入逻辑
+                            eng_font = title_cfg["english_font"]
+                            tf.Name = eng_font
+                            tf.NameAscii = eng_font
+                            tf.NameFarEast = title_cfg["chinese_font"]
+                            
+                            tf.Size = title_cfg["font_size"]
+                            tf.Bold = title_cfg.get("bold", False)
+                            
+                            pf = title_range.ParagraphFormat
+                            pf.Alignment = title_cfg.get("alignment", 1)
+                            pf.LineUnitBefore = title_cfg.get("space_before", 0.5)
+                            pf.LineUnitAfter = title_cfg.get("space_after", 0.0)
+                            pf.CharacterUnitFirstLineIndent = 0
+                            pf.FirstLineIndent = 0
+                            pf.CharacterUnitLeftIndent = 0
+                            pf.LeftIndent = 0
+                    except: pass
+
+                    # C. 表格整体格式
+                    tbl.PreferredWidthType = 2
+                    tbl.PreferredWidth = config.table_width_percent
+                    tbl.Rows.Alignment = 1
+
+                    # D. 单元格一维遍历与 JSON 规则下发
+                    # 【提速 4】改用 enumerate 直接迭代 Cells，避免 Item(j) 的指数级降速
+                    for j, cell in enumerate(tbl.Range.Cells, 1):
+                        clean_text = re.sub(r'[\r\n\x07\s]', '', cell.Range.Text)
+                        if not clean_text:
+                            cell.Shading.BackgroundPatternColor = config.empty_cell_color
+                            audit_log.empty_cells.append(f"P{page_num}-T{idx}-C{j}")
+                        else:
+                            f = cell.Range.Font
+                            # 严谨的字体注入逻辑
+                            eng_font = cell_cfg["english_font"]
+                            f.Name = eng_font
+                            f.NameAscii = eng_font
+                            f.NameFarEast = cell_cfg["chinese_font"]
+                            
+                            f.Size = cell_cfg["font_size"]
+                            f.Bold = cell_cfg.get("bold", False)
+                            
+                            cell.VerticalAlignment = 1
+                            cell.Range.ParagraphFormat.Alignment = cell_cfg.get("alignment", 1)
+                    
+                    audit_log.success += 1
+                except Exception as e:
+                    audit_log.errors += 1
+                    audit_log.error_details.append(f"T{idx} 崩溃: {e}")
+
+            doc.Save()
+            return True
+        
     except Exception as e:
-        if 'pg_root' in locals(): pg_root.destroy()
-        app.ScreenUpdating = True
+        print(f"执行异常: {e}")
         return False
+        
+    finally:
+        # UI 的销毁保留，Word 状态恢复已交由上下文管理器自动完成
+        if 'pg_root' in locals() and pg_root.winfo_exists(): 
+            pg_root.destroy()
 
 # ---------------- 4. 最终主控制流 ----------------
 if __name__ == "__main__":

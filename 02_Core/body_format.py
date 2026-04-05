@@ -20,6 +20,9 @@ import pythoncom  # COM组件初始化
 import tkinter as tk  # GUI库，用于创建用户界面
 from tkinter import simpledialog, messagebox, ttk  # tkinter的子模块，用于对话框和进度条
 
+# 【新增】引入独立的环境保护模块
+from word_env_utils import word_optimized_environment
+
 # 挂载外部备份模块
 # 这行代码将当前文件的上级目录添加到Python路径中，这样就可以导入同级目录下的模块
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -351,41 +354,89 @@ def process_document_body(app, params):
     pg_root = tk.Tk()
     pg_root.title("正文自动排版程序")
     pg_root.attributes('-topmost', True)
-    pg_root.geometry("350x120")
+    pg_root.geometry("350x160")  # 高度加高，给按钮留位置
     tk.Label(pg_root, text=f"正在处理：{doc.Name}", fg="blue").pack(pady=5)
     progress_label = tk.Label(pg_root, text="准备排版...")
     progress_label.pack()
     bar = ttk.Progressbar(pg_root, length=280, mode='determinate', maximum=total_paras)
     bar.pack(pady=10)
+
+    # =========================================
+    # 【新增】停止机制信号
+    cancel_flag = {"is_cancelled": False}
+
+    def stop_process():
+        cancel_flag["is_cancelled"] = True
+        progress_label.config(text="正在安全中止，请稍候...", fg="red")
+        pg_root.update()
+
+    # 添加紧急停止按钮，并拦截右上角的 X 关闭事件
+    tk.Button(pg_root, text="紧急停止", command=stop_process, fg="red", width=10).pack()
+    pg_root.protocol("WM_DELETE_WINDOW", stop_process)
+    # =========================================
+
     pg_root.update()
 
-    # 关闭屏幕更新以提高性能
-    app.ScreenUpdating = False 
-    success_count = 0  # 成功处理的段落数
-    skipped_count = 0  # 跳过的段落数
-    manual_list_skip_count = 0  # 手动列表计数器
-    # 模式标志，用于跟踪上下文
+    success_count = 0  
+    skipped_count = 0  
+    manual_list_skip_count = 0  
     note_mode = basis_mode = conclusion_mode = False 
     
-    try:
-        # 遍历所有段落
+    # 【修改 1】使用上下文管理器接管环境 (完全替代原有的 app.Options 和 try:)
+    with word_optimized_environment(app):
+        
+        # 【修改 2】使用 COM 安全的索引遍历
         for i in range(1, total_paras + 1):
-            # 每10个段落或最后一个更新进度条
-            if i % 10 == 0 or i == total_paras:
-                bar['value'] = i
-                progress_label.config(text=f"正在排版: {i}/{total_paras} 段")
-                pg_root.update()
+            # 降低 GUI 刷新频率，避免卡死 
+            if i % 1 == 0 or i == total_paras:
+                # 防止窗口被意外销毁导致 update 报错
+                if pg_root.winfo_exists():
+                    bar['value'] = i
+                    progress_label.config(text=f"正在排版: {i}/{total_paras} 段")
+                    pg_root.update()
+
+            # 【新增】随时监听中止信号
+            if cancel_flag["is_cancelled"]:
+                print("【中断】用户手动终止了排版过程。")
+                break  # 立即跳出循环，进入 finally 恢复状态
                 
             para = paragraphs.Item(i)
             
             try:
-                # 获取段落所在页码
-                page_num = para.Range.Information(3) 
+                # ==========================================
+                # 【提速核心：页码动态估算与局部拦截】
+                # ==========================================
+                
+                # 第一步：找出跳过页的“天花板”
+                # 如果用户设置了跳过 [1, 2, 4] 页，那 max_skip 就是 4。
+                # 如果用户没设置跳过页，这里就是 0。
+                max_skip = max(skip_pages) if skip_pages else 0
+                
+                # 第二步：划定“必须查询”的风险区域
+                # 假设 Word 一页通常排布 40 个段落。如果用户想跳过前 4 页，
+                # 那么第 1~160 段是“风险区”。这里加 50 是为了做个安全缓冲（防止某页有极多的小短行）。
+                # 逻辑：只有存在跳过页，且当前段落还没跑出这个安全缓冲时，才去查。
+                if skip_pages and i <= (max_skip * 40 + 50):
+                    # 【性能开销极大的一句代码】
+                    # 强迫 Word 计算排版并返回真实页码，只在前几十/一百段执行
+                    page_num = para.Range.Information(3) 
+                else:
+                    # 第三步：安全区直接放行
+                    # 一旦段落序号 i 越过了那个缓冲线，说明肯定已经进入安全正文了。
+                    # 直接给它塞一个永远不会被跳过的假页码（999），彻底避开上面的耗时计算。
+                    page_num = 999 
+
+                # 第四步：执行拦截判定
+                # 如果这个页码（真实的，或者是 999）在用户的跳过清单里，直接结束本次循环。
                 if page_num in skip_pages:
                     skipped_count += 1
-                    continue  # 跳过指定页码
+                    continue
+                    
             except:
-                pass  # 如果获取页码失败，继续处理
+                # 第五步：底层防崩溃保护
+                # Word 中的特殊对象（如某些嵌套表格内的空行）调用 Information(3) 可能会报错。
+                # 直接 pass 静默放行，保证整个排版引擎不中断。
+                pass
 
             # 跳过目录相关的段落
             if para.Range.Information(12) or "目录" in para.Style.NameLocal or "TOC" in para.Style.NameLocal:
@@ -453,11 +504,10 @@ def process_document_body(app, params):
                 apply_paragraph_format(para, full_config[para_type], para_type)
                 success_count += 1
 
-    finally:
-        # 清理：销毁进度条窗口，恢复屏幕更新
-        if 'pg_root' in locals():
-            pg_root.destroy()
-        app.ScreenUpdating = True 
+    # 退出 with 语句块后，Word 环境已自动安全恢复
+    # 仅保留对 UI 窗口的销毁
+    if 'pg_root' in locals() and pg_root.winfo_exists():
+        pg_root.destroy()
         
     return success_count, skipped_count, manual_list_skip_count
 
