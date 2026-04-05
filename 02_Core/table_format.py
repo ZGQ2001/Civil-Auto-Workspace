@@ -205,11 +205,18 @@ def process_all_tables(app):
         pg_root.update()
 
         # 调用上下文管理器接管环境
+        # 调用上下文管理器接管环境
         with word_optimized_environment(app):
-        
-            # 【提速 2】直接使用 enumerate 迭代，废除极慢的预扫描队列
-            for idx, tbl in enumerate(tables, 1):
-                # 监听停止信号
+            
+            # ==========================================
+            # 【提速核心：计算最大跳过页，建立“越界断路器”】
+            # ==========================================
+            max_skip = max(config.skip_pages) if config.skip_pages else 0
+            passed_skip_zone = False  # 是否已越过跳过区的标志
+
+            # 【修复】使用 COM 安全的索引遍历，废除极慢的预扫描队列
+            for idx in range(1, table_count + 1):
+                tbl = tables.Item(idx)
                 
                 # 监听停止信号
                 if cancel_flag["is_cancelled"]:
@@ -223,16 +230,23 @@ def process_all_tables(app):
                     pg_root.update()
 
                 try:
-                    # 【提速 3】只有用户填了跳过页，才去算极度耗时的页码
-                    page_num = 0
-                    if config.skip_pages:
+                    # ==========================================
+                    # 【提速 3 过界免检机制】
+                    # ==========================================
+                    page_num = 999  # 默认赋予安全区页码
+                    
+                    # 只有当用户填了跳过页，且【还未越过最大跳过页】时，才去查真实页码
+                    if config.skip_pages and not passed_skip_zone:
                         try:
                             page_num = tbl.Range.Information(3)
+                            # 核心断路器：只要查出来的页码大于最大跳过页，永久关闭查询开关！
+                            if page_num > max_skip:
+                                passed_skip_zone = True  
                         except:
                             pass
                             
                     # B. 跳过页码判定
-                    if page_num in config.skip_pages:
+                    if page_num != 999 and page_num in config.skip_pages:
                         audit_log.skipped += 1
                         continue
 
@@ -241,7 +255,6 @@ def process_all_tables(app):
                         title_range = tbl.Range.Previous(4, 1)
                         if title_range and re.sub(r'[\s\x07]', '', title_range.Text).startswith("表"):
                             tf = title_range.Font
-                            # 严谨的字体注入逻辑
                             eng_font = title_cfg["english_font"]
                             tf.Name = eng_font
                             tf.NameAscii = eng_font
@@ -266,15 +279,17 @@ def process_all_tables(app):
                     tbl.Rows.Alignment = 1
 
                     # D. 单元格一维遍历与 JSON 规则下发
-                    # 【提速 4】改用 enumerate 直接迭代 Cells，避免 Item(j) 的指数级降速
-                    for j, cell in enumerate(tbl.Range.Cells, 1):
+                    # 【修复】使用 COM 安全的索引遍历 Cells
+                    cells = tbl.Range.Cells
+                    for j in range(1, cells.Count + 1):
+                        cell = cells.Item(j)
                         clean_text = re.sub(r'[\r\n\x07\s]', '', cell.Range.Text)
+                        
                         if not clean_text:
                             cell.Shading.BackgroundPatternColor = config.empty_cell_color
                             audit_log.empty_cells.append(f"P{page_num}-T{idx}-C{j}")
                         else:
                             f = cell.Range.Font
-                            # 严谨的字体注入逻辑
                             eng_font = cell_cfg["english_font"]
                             f.Name = eng_font
                             f.NameAscii = eng_font
