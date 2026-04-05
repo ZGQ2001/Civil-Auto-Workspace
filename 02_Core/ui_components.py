@@ -1,33 +1,40 @@
 """
 ===============================================================================
-脚本名称：全局现代 UI 组件库 (ui_components.py)
+脚本名称：全局现代 UI 组件库 - 工业级防吞窗版 (ui_components.py)
 功能概述：
-    为各类处理脚本提供统一的、现代化的图形交互界面组件。
-    包含：确认弹窗、进度条控制台、信息反馈弹窗。
+    采用 Singleton (单例) 隐藏根窗口 + Toplevel 架构。
+    彻底解决由于连续创建/销毁 CTk 实例导致的“弹窗被系统静默吞噬”或闪退 Bug。
 ===============================================================================
 """
-import tkinter as tk
-from tkinter import ttk
+import customtkinter as ctk
 
-# 全局视觉规范
-UI_COLORS = {
-    "primary": "#0078d4",      # 主题蓝
-    "background": "#f5f5f5",   # 浅灰底色
-    "surface": "#ffffff",      # 纯白面板
-    "text_main": "#333333",    # 主文本
-    "text_sub": "#666666",     # 次文本
-    "danger": "#d32f2f",       # 警告红
-    "danger_bg": "#ffebee"     # 警告红底
-}
+# 全局基础设置
+ctk.set_appearance_mode("System")
+ctk.set_default_color_theme("blue")
+
+# 【核心护城河】：全局唯一隐藏主窗口
+_global_root = None
+
+def _get_root():
+    global _global_root
+    if _global_root is None or not _global_root.winfo_exists():
+        _global_root = ctk.CTk()
+        _global_root.withdraw() # 永远隐藏，仅做锚点
+    return _global_root
 
 class BaseDialog:
     """弹窗基类，处理居中和基础属性"""
     def __init__(self, title, width, height):
-        self.root = tk.Tk()
+        # 【架构升级】：所有弹窗作为子窗口依附于隐藏的根窗口
+        self.root = ctk.CTkToplevel(_get_root())
         self.root.title(title)
         self.root.geometry(f"{width}x{height}")
-        self.root.configure(bg=UI_COLORS["background"])
+        
+        # 强制置顶与焦点获取，彻底防止弹窗被 Word 挡住或被吞掉
         self.root.attributes('-topmost', True)
+        self.root.lift()
+        self.root.focus_force()
+        self.root.resizable(False, False)
         
         # 屏幕居中计算
         self.root.update_idletasks()
@@ -38,26 +45,31 @@ class BaseDialog:
 class ModernConfirmDialog(BaseDialog):
     """现代确认弹窗"""
     def __init__(self, title, message, sub_message=""):
-        super().__init__(title, 450, 250)
+        super().__init__(title, 500, 320)
         self.result = False
         
-        main_frame = tk.Frame(self.root, bg=UI_COLORS["surface"])
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        self.frame = ctk.CTkFrame(self.root, corner_radius=10)
+        self.frame.pack(fill="both", expand=True, padx=25, pady=(25, 10))
         
-        tk.Label(main_frame, text=message, font=("微软雅黑", 11, "bold"), 
-                 bg=UI_COLORS["surface"], fg=UI_COLORS["text_main"], justify=tk.LEFT).pack(anchor=tk.W, pady=(10, 5))
+        self.lbl_msg = ctk.CTkLabel(self.frame, text=message, font=("微软雅黑", 14, "bold"), justify="center")
+        self.lbl_msg.pack(pady=(25, 5), padx=20)
         
         if sub_message:
-            tk.Label(main_frame, text=sub_message, font=("微软雅黑", 9), 
-                     bg=UI_COLORS["surface"], fg=UI_COLORS["text_sub"], justify=tk.LEFT).pack(anchor=tk.W)
+            self.lbl_sub = ctk.CTkLabel(self.frame, text=sub_message, font=("微软雅黑", 12), 
+                                        text_color="gray60", justify="center")
+            self.lbl_sub.pack(pady=10, padx=20)
             
-        btn_frame = tk.Frame(self.root, bg=UI_COLORS["background"])
-        btn_frame.pack(fill=tk.X, pady=15, padx=20)
+        self.btn_frame = ctk.CTkFrame(self.root, fg_color="transparent")
+        self.btn_frame.pack(pady=25)
         
-        tk.Button(btn_frame, text="确认执行", bg=UI_COLORS["primary"], fg="white", 
-                  font=("微软雅黑", 9, "bold"), width=12, command=self._confirm).pack(side=tk.RIGHT, padx=5)
-        tk.Button(btn_frame, text="取消", bg="#e1e1e1", fg=UI_COLORS["text_main"], 
-                  font=("微软雅黑", 9), width=10, command=self._cancel).pack(side=tk.RIGHT)
+        self.btn_confirm = ctk.CTkButton(self.btn_frame, text="确定执行", font=("微软雅黑", 13, "bold"), 
+                                         width=160, height=45, command=self._confirm)
+        self.btn_confirm.pack(side="left", padx=10)
+        
+        self.btn_cancel = ctk.CTkButton(self.btn_frame, text="取消", font=("微软雅黑", 13), 
+                                        width=120, height=45, fg_color="transparent", 
+                                        border_width=1, text_color=("gray10", "gray90"), command=self._cancel)
+        self.btn_cancel.pack(side="left", padx=10)
 
     def _confirm(self):
         self.result = True
@@ -68,46 +80,46 @@ class ModernConfirmDialog(BaseDialog):
         self.root.destroy()
         
     def show(self):
-        self.root.mainloop()
+        # 模态阻塞：接管底层事件队列，防止主程序提前偷跑
+        self.root.grab_set()
+        self.root.master.wait_window(self.root)
         return self.result
 
 class ModernProgressConsole(BaseDialog):
-    """现代进度控制台，带熔断机制"""
+    """现代进度控制台"""
     def __init__(self, title, max_val):
-        super().__init__(title, 400, 180)
+        super().__init__(title, 420, 220)
         self.is_cancelled = False
+        self.max_val = max_val
         
-        tk.Label(self.root, text="引擎运行中...", font=("微软雅黑", 12, "bold"), 
-                 bg=UI_COLORS["background"], fg=UI_COLORS["text_main"]).pack(pady=(20, 10))
+        self.lbl_title = ctk.CTkLabel(self.root, text="运行中...", font=("微软雅黑", 16, "bold"))
+        self.lbl_title.pack(pady=(25, 5))
         
-        self.lbl_status = tk.Label(self.root, text="初始化...", bg=UI_COLORS["background"], fg=UI_COLORS["text_sub"])
+        self.lbl_status = ctk.CTkLabel(self.root, text="初始化...", font=("Consolas", 11), text_color="gray60")
         self.lbl_status.pack()
         
-        # 自定义进度条样式
-        style = ttk.Style()
-        style.theme_use('default')
-        style.configure("Custom.Horizontal.TProgressbar", thickness=8, background=UI_COLORS["primary"], 
-                        troughcolor="#e1e1e1", borderwidth=0)
+        self.bar = ctk.CTkProgressBar(self.root, width=340, height=12, corner_radius=6)
+        self.bar.pack(pady=20)
+        self.bar.set(0)
         
-        self.bar = ttk.Progressbar(self.root, length=320, mode='determinate', 
-                                   maximum=max_val, style="Custom.Horizontal.TProgressbar")
-        self.bar.pack(pady=15)
-        
-        tk.Button(self.root, text="紧急停止", command=self._stop, bg=UI_COLORS["danger_bg"], 
-                  fg=UI_COLORS["danger"], relief=tk.FLAT, width=12).pack()
+        self.btn_stop = ctk.CTkButton(self.root, text="紧急停止", font=("微软雅黑", 12, "bold"), 
+                                      fg_color="#d32f2f", hover_color="#b71c1c", width=140, height=40, command=self._stop)
+        self.btn_stop.pack(pady=5)
         
         self.root.protocol("WM_DELETE_WINDOW", self._stop)
         self.root.update()
 
     def update_progress(self, current_val, status_text):
         if self.root.winfo_exists():
-            self.bar['value'] = current_val
-            self.lbl_status.config(text=status_text)
+            progress_ratio = current_val / self.max_val if self.max_val > 0 else 0
+            self.bar.set(progress_ratio)
+            self.lbl_status.configure(text=status_text)
             self.root.update()
 
     def _stop(self):
         self.is_cancelled = True
-        self.lbl_status.config(text="正在安全中断连接，请稍候...", fg=UI_COLORS["danger"])
+        self.lbl_status.configure(text="正在中止安全环境...", text_color="#d32f2f")
+        self.btn_stop.configure(state="disabled")
         self.root.update()
 
     def close(self):
@@ -117,16 +129,81 @@ class ModernProgressConsole(BaseDialog):
 class ModernInfoDialog(BaseDialog):
     """现代信息反馈弹窗"""
     def __init__(self, title, message):
-        super().__init__(title, 400, 200)
+        super().__init__(title, 550, 420)
         
-        main_frame = tk.Frame(self.root, bg=UI_COLORS["surface"])
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        self.frame = ctk.CTkFrame(self.root, corner_radius=10)
+        self.frame.pack(fill="both", expand=True, padx=25, pady=25)
         
-        tk.Label(main_frame, text=message, font=("微软雅黑", 10), 
-                 bg=UI_COLORS["surface"], fg=UI_COLORS["text_main"], justify=tk.LEFT).pack(pady=20)
+        inner_content = ctk.CTkFrame(self.frame, fg_color="transparent")
+        inner_content.pack(expand=True)
         
-        tk.Button(self.root, text="关闭", bg=UI_COLORS["primary"], fg="white", 
-                  font=("微软雅黑", 9), width=15, command=self.root.destroy).pack(pady=15)
+        self.lbl_msg = ctk.CTkLabel(inner_content, text=message, font=("微软雅黑", 13), 
+                                    justify="left")
+        self.lbl_msg.pack(pady=20, padx=20)
+        
+        self.btn_close = ctk.CTkButton(self.root, text="确定", font=("微软雅黑", 14, "bold"), 
+                                       width=180, height=48, command=self.root.destroy)
+        self.btn_close.pack(pady=(0, 25))
 
     def show(self):
-        self.root.mainloop()
+        self.root.grab_set()
+        self.root.master.wait_window(self.root)
+
+class ModernParamDialog(BaseDialog):
+    """现代参数输入面板"""
+    def __init__(self, title, file_name, show_width=False):
+        # 保持原有的窗口尺寸逻辑
+        super().__init__(title, 500, 380 if show_width else 340)
+        self.params = None
+        
+        ctk.CTkLabel(self.root, text=f"📄 目标文件: {file_name}", font=("微软雅黑", 13, "bold")).pack(pady=(25, 15))
+        
+        # 【核心修复 1】：必须显式绑定 master=self.root，防止变量作用域脱离当前子窗口
+        self.type_var = ctk.StringVar(master=self.root, value="检测报告")
+        
+        f1 = ctk.CTkFrame(self.root, fg_color="transparent")
+        f1.pack(pady=10) 
+        ctk.CTkLabel(f1, text="报告类型:", font=("微软雅黑", 12)).pack(side="left", padx=5)
+        ctk.CTkRadioButton(f1, text="检测报告", variable=self.type_var, value="检测报告").pack(side="left", padx=10)
+        ctk.CTkRadioButton(f1, text="鉴定报告", variable=self.type_var, value="鉴定报告").pack(side="left", padx=10)
+
+        self.width_entry = None
+        if show_width:
+            f2 = ctk.CTkFrame(self.root, fg_color="transparent")
+            f2.pack(pady=10)
+            ctk.CTkLabel(f2, text="表格宽度(%):", font=("微软雅黑", 12)).pack(side="left", padx=5)
+            self.width_entry = ctk.CTkEntry(f2, width=100)
+            self.width_entry.insert(0, "95")
+            self.width_entry.pack(side="left", padx=10)
+
+        f3 = ctk.CTkFrame(self.root, fg_color="transparent")
+        f3.pack(pady=10)
+        ctk.CTkLabel(f3, text="跳过页码:", font=("微软雅黑", 12)).pack(side="left", padx=5)
+        
+        # 定义输入框并设置占位符
+        self.skip_entry = ctk.CTkEntry(f3, placeholder_text="如: 1,2,3 (留空全排)", width=200)
+        
+        # 【核心修复 2】：注入默认实体文本。防止用户误把占位符当默认值直接点确定导致引擎瞎排前几页
+        self.skip_entry.insert(0, "1,2,3,4") 
+        
+        self.skip_entry.pack(side="left", padx=10)
+
+        self.btn_confirm = ctk.CTkButton(self.root, text="确定", command=self._confirm, 
+                                         font=("微软雅黑", 14, "bold"), width=180, height=48)
+        self.btn_confirm.pack(pady=(30, 20))
+
+    def _confirm(self):
+        skips = []
+        # 获取跳过页码的逻辑保持不变
+        if self.skip_entry.get().strip():
+            skips = [int(p.strip()) for p in self.skip_entry.get().replace("，", ",").split(",") if p.strip().isdigit()]
+        
+        self.params = {"report_type": self.type_var.get(), "skip_pages": skips}
+        if self.width_entry:
+            self.params["width"] = int(self.width_entry.get() or "100")
+        self.root.destroy()
+
+    def show(self):
+        self.root.grab_set()
+        self.root.master.wait_window(self.root)
+        return self.params

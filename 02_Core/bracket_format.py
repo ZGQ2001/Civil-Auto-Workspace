@@ -10,43 +10,26 @@
 import os
 import sys
 import win32com.client
-import tkinter as tk
-from tkinter import messagebox
 
 # 挂载外部备份模块（与正文、表格脚本共用）
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from file_utils_backup import backup_current_document
+from ui_components import ModernConfirmDialog, ModernInfoDialog
 
 def process_brackets(app, doc_name):
     # 步骤1：防呆确认弹窗
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes('-topmost', True)
-    
-    prompt = (
-        f"📂 当前文件：{doc_name}\n\n"
-        "是否执行【括号半全角专项纠偏】处理？\n\n"
-        "处理逻辑：\n"
-        "1. 全局小括号建立基准（统一转全角）\n"
-        "2. 纯技术参数转半角\n"
-        "3. 书名号及国标规范代号锁定全角（如 GB/T, JGJ 等）\n"
-        "4. 纯数字层级序号锁定全角\n"
-        "5. 锚定排除：包含“第”字的编号保留半角\n\n"
-        "确认后将调用静默备份并开始执行。"
+    dialog = ModernConfirmDialog(
+        title="括号专项引擎启动", 
+        message=f"当前文件：{doc_name}", 
+        sub_message="执行全局括号半全角纠偏？\n\n核心逻辑：\n1. 普通括号转全角\n2. 纯技术参数转半角\n3. 规范代号/层级序号锁定全角\n\n确认后将调用静默备份并开始执行。"
     )
-    if not messagebox.askyesno("括号专项引擎启动", prompt, parent=root):
-        root.destroy()
+    if not dialog.show():
         return False
-    root.destroy()
 
     # 步骤2：执行统一静默备份
     print("正在调用外部模块进行静默备份...")
     if not backup_current_document(app):
-        err_root = tk.Tk()
-        err_root.withdraw()
-        err_root.attributes('-topmost', True)
-        messagebox.showerror("安全熔断", "⚠️ 备份模块返回失败信号！操作已终止。", parent=err_root)
-        err_root.destroy()
+        ModernInfoDialog("安全熔断", "⚠️ 备份模块返回失败信号！操作已终止。").show()
         return False
 
     # 步骤3：核心替换逻辑
@@ -108,32 +91,24 @@ def process_brackets(app, doc_name):
             )
             
         # 成功反馈
-        succ_root = tk.Tk()
-        succ_root.withdraw()
-        succ_root.attributes('-topmost', True)
-        messagebox.showinfo(
-            "执行完毕", 
+        msg = (
             f"✅ 文档括号专项纠偏完成！\n\n"
             f"- 技术参数：已转半角\n"
             f"- 规范代号：已锁定全角\n"
             f"- 层级序号：已锁定全角\n"
-            f"- 锚定排除：第() 已保留半角",
-            parent=succ_root
+            f"- 锚定排除：第() 已保留半角"
         )
-        succ_root.destroy()
+        ModernInfoDialog("执行完毕", msg).show()
         return True
 
     except Exception as e:
-        err_root = tk.Tk()
-        err_root.withdraw()
-        err_root.attributes('-topmost', True)
-        messagebox.showerror("运行期错误拦截", f"架构运行遭遇异常抛出：\n{str(e)}", parent=err_root)
-        err_root.destroy()
+        ModernInfoDialog("运行期错误拦截", f"架构运行遭遇异常抛出：\n{str(e)}").show()
         return False
         
     finally:
         app.ScreenUpdating = True
         app.StatusBar = "就绪"
+
 
 if __name__ == "__main__":
     try:
@@ -145,18 +120,10 @@ if __name__ == "__main__":
             app = None
 
     if not app:
-        err_root = tk.Tk()
-        err_root.withdraw()
-        err_root.attributes('-topmost', True)
-        messagebox.showerror("运行阻断", "未检测到运行中的 WPS 或 Word 程序。\n\n请先打开需要处理的报告文档！", parent=err_root)
-        err_root.destroy()
+        ModernInfoDialog("运行阻断", "未检测到运行中的 WPS 或 Word 程序 \n\n请先打开需要处理的报告文档！").show()
     else:
         # 隐患拦截：拦截未保存的新建文档，防止静默备份引发异常
         if app.ActiveDocument.Path == "":
-            err_root = tk.Tk()
-            err_root.withdraw()
-            err_root.attributes('-topmost', True)
-            messagebox.showwarning("操作阻断", "该文档尚未保存到本地硬盘。\n请先手动保存一次（Ctrl+S）后再执行排版引擎！", parent=err_root)
-            err_root.destroy()
+            ModernInfoDialog("操作阻断", "该文档尚未保存到本地硬盘。\n请先手动保存一次（Ctrl+S）后再执行排版引擎！").show()
         else:
             process_brackets(app, app.ActiveDocument.Name)

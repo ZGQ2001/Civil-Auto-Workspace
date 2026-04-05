@@ -8,39 +8,28 @@
 ===============================================================================
 """
 
-import tkinter as tk
-from tkinter import ttk, messagebox
-import subprocess
-import sys
 import os
+import sys
+import subprocess
+import customtkinter as ctk
 
 class MainDashboard:
     def __init__(self, root):
         self.root = root
-        self.root.title("报告自动化 V2.0")
+        self.root.title("工程自动化程序 V2.0")
         self.root.geometry("450x520")
-        self.root.resizable(False, False)  # 锁定窗口大小，保持界面规整
+        self.root.resizable(False, False)
         
-        # 设置全局样式
-        style = ttk.Style()
-        style.configure("TButton", font=("Microsoft YaHei", 11), padding=10)
-        style.configure("TLabel", font=("Microsoft YaHei", 12, "bold"))
-        style.configure("Header.TLabel", font=("Microsoft YaHei", 16, "bold"), foreground="#2c3e50")
+        # 顶部标题区
+        self.header = ctk.CTkFrame(self.root, fg_color="transparent")
+        self.header.pack(fill="x", pady=(30, 20))
+        ctk.CTkLabel(self.header, text="工程自动化程序", font=("微软雅黑", 22, "bold"), text_color="#0078d4").pack()
+        ctk.CTkLabel(self.header, text="Automation Dashboard", font=("Consolas", 12), text_color="gray50").pack()
 
-        self.setup_ui()
+        # 核心按钮区
+        self.main_frame = ctk.CTkFrame(self.root, corner_radius=15)
+        self.main_frame.pack(fill="both", expand=True, padx=40, pady=10)
 
-    def setup_ui(self):
-        # 顶部标题栏
-        header_frame = tk.Frame(self.root, bg="#ecf0f1", pady=20)
-        header_frame.pack(fill=tk.X)
-        ttk.Label(header_frame, text="报告自动化排版矩阵", style="Header.TLabel", background="#ecf0f1").pack()
-        ttk.Label(header_frame, text="Unified Automation Dashboard", font=("Arial", 9), background="#ecf0f1", foreground="#7f8c8d").pack()
-
-        # 核心功能区
-        main_frame = tk.Frame(self.root, pady=20, padx=40)
-        main_frame.pack(fill=tk.BOTH, expand=True)
-
-        # 按钮列表：包含文本描述和对应的脚本文件名
         modules = [
             ("报告正文排版引擎", "body_format.py"),
             ("报告表格排版引擎", "table_format.py"),
@@ -49,46 +38,24 @@ class MainDashboard:
             ("文档转换小工具", "word2pdf.py"),
         ]
 
-        # 循环生成启动按钮
         for text, script in modules:
-            btn = ttk.Button(
-                main_frame, 
-                text=text, 
-                command=lambda s=script: self.launch_module(s)
-            )
-            btn.pack(fill=tk.X, pady=8)
+            btn = ctk.CTkButton(self.main_frame, text=text, font=("微软雅黑", 14, "bold"), height=40,
+                                command=lambda s=script: self.launch_module(s))
+            btn.pack(fill="x", padx=20, pady=12)
 
-        # 底部状态栏
-        footer_frame = tk.Frame(self.root, pady=10)
-        footer_frame.pack(side=tk.BOTTOM, fill=tk.X)
-        ttk.Label(footer_frame, text="状态: 引擎就绪 | 依赖 JSON 规则库驱动", font=("Microsoft YaHei", 9)).pack()
+        # 底部状态
+        ctk.CTkLabel(self.root, text=" 作者: ZGQ ", font=("微软雅黑", 11), text_color="gray60").pack(side="bottom", pady=15)
 
     def launch_module(self, script_name):
-        """
-        异步调用子脚本
-        """
         script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), script_name)
-        
         if not os.path.exists(script_path):
-            messagebox.showerror("模块缺失", f"系统未能找到执行文件：\n{script_path}")
+            print(f"缺失模块: {script_path}")
             return
-            
-        try:
-            # 使用同级 Python 解释器异步启动子脚本，避免阻塞主面板
-            subprocess.Popen([sys.executable, script_path])
-        except Exception as e:
-            messagebox.showerror("启动失败", f"无法唤醒模块 {script_name}，底层错误：\n{str(e)}")
+        subprocess.Popen([sys.executable, script_path])
 
 if __name__ == "__main__":
-    root = tk.Tk()
+    ctk.set_appearance_mode("System")
+    ctk.set_default_color_theme("blue")
+    root = ctk.CTk()
     app = MainDashboard(root)
-    
-    # 将窗口居中显示
-    root.update_idletasks()
-    width = root.winfo_width()
-    height = root.winfo_height()
-    x = (root.winfo_screenwidth() // 2) - (width // 2)
-    y = (root.winfo_screenheight() // 2) - (height // 2)
-    root.geometry(f'{width}x{height}+{x}+{y}')
-    
     root.mainloop()
