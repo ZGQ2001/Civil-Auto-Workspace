@@ -183,10 +183,20 @@ class ModernParamDialog(BaseDialog):
         # 第二行：表格宽度（按需渲染）
         self.width_entry = None
         if show_width:
-            ctk.CTkLabel(form_frame, text="表格宽度(%):", font=("微软雅黑", 12)).grid(row=row_idx, column=1, sticky="e", pady=12, padx=(0, 15))
-            self.width_entry = ctk.CTkEntry(form_frame, width=120)
+            # 【核心修改 1】：文案剥离，强行缩减为4个字，与上下保持绝对物理等长
+            ctk.CTkLabel(form_frame, text="表格宽度:", font=("微软雅黑", 12)).grid(row=row_idx, column=1, sticky="e", pady=12, padx=(0, 15))
+            
+            # 【核心修改 2】：创建一个内部小容器，用来横向包裹“输入框”和“%”符号
+            width_frame = ctk.CTkFrame(form_frame, fg_color="transparent")
+            width_frame.grid(row=row_idx, column=2, sticky="w", pady=12)
+            
+            # 输入框长度稍微缩短至 195，给后面的 % 腾出视觉空间，保证整体 220 的总宽度
+            self.width_entry = ctk.CTkEntry(width_frame, width=195)
             self.width_entry.insert(0, "95")
-            self.width_entry.grid(row=row_idx, column=2, sticky="w", pady=12)
+            self.width_entry.pack(side="left")
+            
+            # 【核心修改 3】：把 % 作为后缀单位，贴在输入框的右侧
+            ctk.CTkLabel(width_frame, text="%", font=("微软雅黑", 12)).pack(side="left", padx=(5, 0))
             row_idx += 1
 
         # 第三行：跳过页码
