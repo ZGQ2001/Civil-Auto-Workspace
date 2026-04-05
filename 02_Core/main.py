@@ -47,7 +47,6 @@ class MainDashboard:
             ("全局括号半全角纠偏", "bracket_format.py"),
             ("交叉引用格式修复", "fix_cross_ref.py"),
             ("Word转PDF与合并工具", "word2pdf.py"),
-            ("PDF坐标拾取导出器", "pdf_coordinate_picker.py")
         ]
 
         # 循环生成启动按钮

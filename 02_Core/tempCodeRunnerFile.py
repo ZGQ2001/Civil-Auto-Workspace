@@ -1,0 +1,1 @@
+("PDF坐标拾取导出器", "pdf_coordinate_picker.py")
