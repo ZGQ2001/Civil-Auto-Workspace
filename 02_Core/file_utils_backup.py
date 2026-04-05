@@ -3,32 +3,20 @@
 脚本名称：通用文档/表格备份工具 (file_utils_backup.py)
 作者: ZGQ
 功能概述：
-    为当前激活的 Word/WPS 或 Excel/ET 文档提供安全备份功能。
-    自动识别应用程序类型（文字或表格），执行底层克隆备份。
+    为传入的 Word/WPS 或 Excel/ET 内存对象提供安全备份功能。
+    V3.0 修复版：废除 hasattr 探测，采用原生 Application.Name 显式鉴别。
 ===============================================================================
 """
 import os
 import time
 
-def backup_current_document(app):
+def backup_current_document(target_obj):
     try:
-        # 1. 自动探测传入的 COM 对象类型
-        is_word = True
+        # 1. 安全读取文件路径属性
         try:
-            doc = app.ActiveDocument  # 尝试按 Word 处理
-        except Exception:
-            try:
-                doc = app.ActiveWorkbook  # 尝试按 Excel 处理
-                is_word = False
-            except Exception:
-                print("【备份阻断】无法识别当前的应用程序对象 (非Word/Excel)。")
-                return False
-
-        # 2. 安全读取文件路径属性
-        try:
-            doc_path = doc.Path
-            doc_fullname = doc.FullName
-            doc_name = doc.Name
+            doc_path = target_obj.Path
+            doc_fullname = target_obj.FullName
+            doc_name = target_obj.Name
         except Exception:
             doc_path = ""
             doc_fullname = ""
@@ -38,25 +26,42 @@ def backup_current_document(app):
             print("【备份阻断】源文件尚未执行本地存储。")
             return False
         
-        # 3. 保存源文件最新状态
-        doc.Save()
+        # 2. 保存源文件最新状态
+        target_obj.Save()
         
-        # 4. 构建备份路径
+        # 3. 构建备份路径
         base, ext = os.path.splitext(doc_fullname)
         timestamp = time.strftime("%Y%m%d_%H时%M分")
         backup_path = f"{base}_backup_{timestamp}{ext}"
 
-        # 5. 根据软件类型执行不同的底层克隆逻辑
-        if is_word:
+        # 4. 【核心修复】：直接获取宿主程序的名称进行安全判定
+        app_name = ""
+        try:
+            app_name = target_obj.Application.Name
+        except Exception:
+            pass
+
+        # 匹配 Microsoft Excel, WPS 表格, ET 等环境
+        if "Excel" in app_name or "表格" in app_name or "ET" in app_name:
+            target_obj.SaveCopyAs(backup_path)
+            
+        # 默认按 Microsoft Word 或 WPS 文字环境处理
+        else:
+            app = target_obj.Application
             backup_doc = app.Documents.Add(doc_fullname)
             backup_doc.SaveAs2(backup_path)
             backup_doc.Close(0)  # 0 = wdDoNotSaveChanges
-        else:
-            # Excel 使用 SaveCopyAs，只备份不切换当前激活的工作簿
-            doc.SaveCopyAs(backup_path)
 
         return True
 
     except Exception as e:
+        # 【新增兜底】：将真实的 COM 报错写入日志文件，方便后续排查
+        error_log_path = os.path.join(os.path.dirname(__file__), "backup_error_log.txt")
+        try:
+            with open(error_log_path, "w", encoding="utf-8") as f:
+                f.write(f"备份底层崩溃详情:\n{str(e)}")
+        except:
+            pass
+            
         print(f"【备份异常】底层执行出错: {e}")
         return False

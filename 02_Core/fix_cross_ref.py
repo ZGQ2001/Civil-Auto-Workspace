@@ -6,101 +6,90 @@
     本脚本用于自动化处理 Word/WPS 检测报告中的交叉引用格式，
     解决手动调整耗时且易漏项的问题，保证每次的格式一致性。
 
-    这个脚本是用来修复Word文档中交叉引用格式问题的工具。交叉引用是指文档中引用其他部分（如"见表1"）的链接。
-    有时候这些引用在更新时会丢失格式，这个脚本会自动添加格式保护开关，确保引用保持正确的格式。
-
 核心工作流：
-    1. 环境检测：抓取当前处于激活状态的 Word/WPS 文档。
-    2. 遍历所有域代码, 定位交叉引用 (REF 域) 。
-    3. 检查每个交叉引用是否已包含保留格式的开关 (\* MERGEFORMAT) 。
-    4. 对于缺失该开关的交叉引用，自动追加 \* MERGEFORMAT 开关以确保格式稳定。
-    5. 结果汇总：展示处理总数，完成修复闭环
-
-前置依赖：
-    - 运行前必须打开目标文档。
-    - 同级目录下需存在 `file_utils_backup.py` 模块。
+    1. 环境检测：抓取当前处于激活状态的 Word/WPS 文档并死锁内存对象。
+    2. 触发静默克隆备份。
+    3. 遍历所有域代码, 定位交叉引用 (REF 域) 。
+    4. 检查每个交叉引用是否已包含保留格式的开关 (\* MERGEFORMAT) 。
+    5. 对于缺失该开关的交叉引用，自动追加 \* MERGEFORMAT 开关以确保格式稳定。
 ===============================================================================
 """
-import tkinter as tk
-from tkinter import messagebox
-import os  # 用于路径操作
-import sys  # 用于添加模块路径
-import win32com.client  # 用于控制Word/WPS
-import pythoncom  # COM组件初始化
+import os
+import sys
+import win32com.client
 
-# 【挂载外部模块备份文件】
+# 挂载外部模块
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from file_utils_backup import backup_current_document  # 导入备份函数
+from file_utils_backup import backup_current_document
+from ui_components import ModernConfirmDialog, ModernInfoDialog
 
-
-def update_cross_references():
+def update_cross_references(app, target_doc):
     """
-    修复当前活动文档中的交叉引用格式。
-
-    遍历文档中的所有域，找到交叉引用域，为缺失格式保护开关的引用添加 \* MERGEFORMAT 开关。
+    修复锁定文档中的交叉引用格式。
     """
-    # 1. 尝试连接到正在运行的文字处理程序
-    try:
-        # 大多数情况下，WPS也使用"Word.Application"作为COM名称以保持兼容
-        app = win32com.client.GetActiveObject("Word.Application")
-    except pythoncom.com_error:
-        try:
-            # 备用方案：显式寻找WPS进程
-            app = win32com.client.GetActiveObject("KWPS.Application")
-        except pythoncom.com_error:
-            err_root = tk.Tk()
-            err_root.withdraw()
-            err_root.attributes('-topmost', True)
-            messagebox.showerror("运行阻断", "未检测到运行中的 WPS 或 Word 程序。\n\n请先打开需要修复的报告文档！", parent=err_root)
-            err_root.destroy()
-            return  # 阻断退出
+    doc_name = target_doc.Name
+    
+    # 1. 启动确认与防呆
+    dialog = ModernConfirmDialog(
+        title="交叉引用修复引擎启动", 
+        message=f"当前文件：{doc_name}", 
+        sub_message="是否为所有交叉引用追加保留格式开关 (\* MERGEFORMAT) ？\n\n确认后将调用静默备份并开始执行。"
+    )
+    if not dialog.show():
+        return False
+
+    # 2. 执行统一静默备份
+    print("正在调用外部模块进行静默备份...")
+    if not backup_current_document(target_doc):
+        ModernInfoDialog("安全熔断", "⚠️ 备份模块返回失败信号！操作已终止。").show()
+        return False
 
     try:
         # 关闭屏幕更新以提高处理速度
         app.ScreenUpdating = False
         
-        # 获取活动文档
-        doc = app.ActiveDocument
-        fields = doc.Fields  # 获取文档中的所有域
-        count = 0  # 计数器，记录修复的引用数量
+        # 3. 锁定死锁的文档对象进行遍历
+        fields = target_doc.Fields
+        count = 0 
 
-        # 2. 遍历所有域代码 (注意：COM对象的索引从1开始)
         for i in range(1, fields.Count + 1):
             f = fields.Item(i)
-            
             # 3代表wdFieldRef，即交叉引用/引用域
             if f.Type == 3:
-                code_text = f.Code.Text  # 获取域代码文本
-                
-                # 检查是否已经存在格式保护开关 \* MERGEFORMAT
+                code_text = f.Code.Text
+                # 检查是否已经存在格式保护开关
                 if "\\* MERGEFORMAT" not in code_text.upper():
-                    # 如果没有，追加保留格式的开关
                     f.Code.Text = code_text + " \\* MERGEFORMAT"
-                    count += 1  # 计数器加1
+                    count += 1
                     
-        # 成功反馈弹窗
-        succ_root = tk.Tk()
-        succ_root.withdraw()
-        succ_root.attributes('-topmost', True)
-        messagebox.showinfo("执行完毕", f"✅ 交叉引用修复完毕！\n\n共为 {count} 个交叉引用追加了保留格式开关。", parent=succ_root)
-        succ_root.destroy()
+        # 4. 成功反馈
+        ModernInfoDialog("执行完毕", f"✅ 交叉引用修复完毕！\n\n共为 {count} 个交叉引用追加了保留格式开关。").show()
+        return True
 
     except Exception as e:
-        # 异常拦截弹窗
-        err_root = tk.Tk()
-        err_root.withdraw()
-        err_root.attributes('-topmost', True)
-        messagebox.showerror("运行期错误", f"执行过程中出错:\n{e}", parent=err_root)
-        err_root.destroy()
+        ModernInfoDialog("运行期错误", f"执行过程中出错:\n{e}").show()
+        return False
+        
     finally:
-        # 无论成功还是失败，都要恢复屏幕更新，防止文档卡死
         app.ScreenUpdating = True
 
 
 if __name__ == "__main__":
-    """
-    主程序入口。
+    try:
+        app = win32com.client.GetActiveObject("Word.Application")
+    except:
+        try:
+            app = win32com.client.GetActiveObject("KWPS.Application")
+        except:
+            app = None
 
-    直接运行此脚本时，会自动修复当前打开文档中的交叉引用格式。
-    """
-    update_cross_references()  # 调用修复函数
+    if not app:
+        ModernInfoDialog("运行阻断", "未检测到运行中的 WPS 或 Word 程序。\n\n请先打开需要修复的报告文档！").show()
+    else:
+        # 隐患拦截：防止未保存的新建文档导致备份异常
+        if app.ActiveDocument.Path == "":
+            ModernInfoDialog("操作阻断", "该文档尚未保存到本地硬盘。\n请先手动保存一次（Ctrl+S）后再执行修复程序！").show()
+        else:
+            # 【核心护城河】：获取目标文档并死锁内存指针，贯穿全局
+            target_doc = app.ActiveDocument
+            update_cross_references(app, target_doc)

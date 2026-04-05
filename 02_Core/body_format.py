@@ -15,6 +15,7 @@ import json
 import re  
 import win32com.client  
 import pythoncom  
+import time
 
 # ---------------- 自定义模块集成 ----------------
 from word_env_utils import word_optimized_environment
@@ -158,9 +159,13 @@ def process_document_body(app, doc, params):
     
     try:
         with word_optimized_environment(app):
+            last_ui_update = time.time()
+            
             for i in range(1, total_paras + 1):
-                if i % 1 == 0 or i == total_paras:
+                current_time = time.time()
+                if current_time - last_ui_update >= 0.05 or i == total_paras:
                     progress_ui.update_progress(i, f"正在排版: {i}/{total_paras} 段")
+                    last_ui_update = current_time
 
                 if progress_ui.is_cancelled:
                     print("【中断】用户手动终止了排版过程。")
@@ -264,7 +269,7 @@ if __name__ == "__main__":
                 if final_check_summary(current_file, run_params):
                     print("正在调用外部模块进行静默备份...")
                     # 即使 backup_current_document 导致 WPS 焦点偏移，target_doc 依然指向原文档
-                    if backup_current_document(app):
+                    if backup_current_document(target_doc):
                         try:
                             # 【核心修复 2】：将锁定的 target_doc 显式传入排版引擎
                             succ_cnt, skip_cnt, manual_cnt = process_document_body(app, target_doc, run_params)

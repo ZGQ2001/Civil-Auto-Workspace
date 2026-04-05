@@ -4,49 +4,74 @@
 作者：ZGQ
 功能概述：
     提供用于 Word 自动化操作的上下文管理器，实现底层执行效率优化与状态安全兜底。
-    
-    这个脚本相当于排版引擎的“加速器”和“安全锁”。它会在排版开始前，自动关掉 
-    Word 耗时的后台计算（如拼写检查、自动分页等）让程序全速运行；并在排版结
-    束或中途报错被掐断时，强制把 Word 恢复到正常的亮屏可用状态，彻底杜绝 Word 
-    假死或卡顿报错。所有涉及 Word 批量处理的脚本都可以直接套用它。
+    V3.0 工业级优化版：引入防御性状态存取与全量弹窗静默，完美适配 WPS 复杂接口。
 ===============================================================================
 """
 
 from contextlib import contextmanager
-import win32com.client
 
 @contextmanager
 def word_optimized_environment(app):
     """
     Word 排版加速与安全恢复的上下文管理器。
-    
-    作用：
-    1. 进入该环境时，自动关闭 Word 的后台计算和屏幕刷新。
-    2. 退出该环境时（无论是正常结束还是抛出异常/被手动中断），强制恢复 Word 原有状态。
     """
+    # 使用字典记录成功获取到的原始状态，避免获取失败导致变量未定义
+    states = {}
+    
     # ====== 进入环境：挂起 Word ======
     try:
-        # 保存原有的状态（虽然通常都是 True，但更严谨的做法是保存当前状态）
-        original_updating = app.ScreenUpdating
-        original_pagination = app.Options.Pagination
-        original_spelling = app.Options.CheckSpellingAsYouType
-        original_grammar = app.Options.CheckGrammarAsYouType
+        # 1. 最关键的基础挂起
+        try:
+            states['ScreenUpdating'] = app.ScreenUpdating
+            app.ScreenUpdating = False
+        except: pass
         
-        # 强制关闭，全速运行
-        app.ScreenUpdating = False
-        app.Options.Pagination = False
-        app.Options.CheckSpellingAsYouType = False
-        app.Options.CheckGrammarAsYouType = False
+        # 2. 【核心优化】弹窗静默 (极其重要：防止后台系统级弹窗导致假死)
+        try:
+            states['DisplayAlerts'] = app.DisplayAlerts
+            app.DisplayAlerts = 0  # 0 = wdAlertsNone
+        except: pass
+
+        # 3. 【核心优化】耗时选项挂起 (采用防御性读取，防止部分精简版 WPS 接口报错中断引擎)
+        try:
+            states['Pagination'] = app.Options.Pagination
+            app.Options.Pagination = False
+        except: pass
         
-        # 把控制权交还给主程序（即 yield 后面的代码开始执行）
+        try:
+            states['CheckSpelling'] = app.Options.CheckSpellingAsYouType
+            app.Options.CheckSpellingAsYouType = False
+        except: pass
+
+        try:
+            states['CheckGrammar'] = app.Options.CheckGrammarAsYouType
+            app.Options.CheckGrammarAsYouType = False
+        except: pass
+
+        # 把控制权交还给主程序
         yield 
         
     # ====== 退出环境：安全恢复 ======
     finally:
+        # 【核心优化】必须将所有状态的恢复独立进行
+        # 防止某一个不兼容属性恢复失败时，抛出异常导致后面的 ScreenUpdating 无法亮屏
         try:
-            app.ScreenUpdating = True # 强制亮屏
-            app.Options.Pagination = original_pagination
-            app.Options.CheckSpellingAsYouType = original_spelling
-            app.Options.CheckGrammarAsYouType = original_grammar
-        except Exception as e:
-            print(f"【环境恢复异常】Word 状态恢复失败: {e}")
+            if 'CheckGrammar' in states: app.Options.CheckGrammarAsYouType = states['CheckGrammar']
+        except: pass
+        
+        try:
+            if 'CheckSpelling' in states: app.Options.CheckSpellingAsYouType = states['CheckSpelling']
+        except: pass
+        
+        try:
+            if 'Pagination' in states: app.Options.Pagination = states['Pagination']
+        except: pass
+        
+        try:
+            if 'DisplayAlerts' in states: app.DisplayAlerts = states['DisplayAlerts']
+        except: pass
+        
+        # 最核心的屏幕刷新必须独立保证执行
+        try:
+            app.ScreenUpdating = True
+        except: pass

@@ -92,7 +92,7 @@ class ModernProgressConsole(BaseDialog):
         self.is_cancelled = False
         self.max_val = max_val
         
-        self.lbl_title = ctk.CTkLabel(self.root, text="运行中...", font=("微软雅黑", 16, "bold"))
+        self.lbl_title = ctk.CTkLabel(self.root, text="引擎运行中...", font=("微软雅黑", 16, "bold"))
         self.lbl_title.pack(pady=(25, 5))
         
         self.lbl_status = ctk.CTkLabel(self.root, text="初始化...", font=("Consolas", 11), text_color="gray60")
@@ -152,49 +152,56 @@ class ModernInfoDialog(BaseDialog):
 class ModernParamDialog(BaseDialog):
     """现代参数输入面板"""
     def __init__(self, title, file_name, show_width=False):
-        # 保持原有的窗口尺寸逻辑
         super().__init__(title, 500, 380 if show_width else 340)
         self.params = None
         
         ctk.CTkLabel(self.root, text=f"📄 目标文件: {file_name}", font=("微软雅黑", 13, "bold")).pack(pady=(25, 15))
         
-        # 【核心修复 1】：必须显式绑定 master=self.root，防止变量作用域脱离当前子窗口
+        # 必须绑定 master=self.root，防止变量脱离作用域
         self.type_var = ctk.StringVar(master=self.root, value="检测报告")
         
-        f1 = ctk.CTkFrame(self.root, fg_color="transparent")
-        f1.pack(pady=10) 
-        ctk.CTkLabel(f1, text="报告类型:", font=("微软雅黑", 12)).pack(side="left", padx=5)
-        ctk.CTkRadioButton(f1, text="检测报告", variable=self.type_var, value="检测报告").pack(side="left", padx=10)
-        ctk.CTkRadioButton(f1, text="鉴定报告", variable=self.type_var, value="鉴定报告").pack(side="left", padx=10)
+        # ---------------- 核心排版：Grid 网格布局 ----------------
+        form_frame = ctk.CTkFrame(self.root, fg_color="transparent")
+        form_frame.pack(pady=10, padx=20, fill="both", expand=True)
+        
+        # 配置列权重：左右两列为弹簧列拉伸，中间两列被强制居中对齐
+        form_frame.grid_columnconfigure(0, weight=1)
+        form_frame.grid_columnconfigure(1, weight=0, minsize=100) 
+        form_frame.grid_columnconfigure(2, weight=0, minsize=220) 
+        form_frame.grid_columnconfigure(3, weight=1)
 
+        row_idx = 0
+        
+        # 第一行：报告类型
+        ctk.CTkLabel(form_frame, text="报告类型:", font=("微软雅黑", 12)).grid(row=row_idx, column=1, sticky="e", pady=12, padx=(0, 15))
+        radio_frame = ctk.CTkFrame(form_frame, fg_color="transparent")
+        radio_frame.grid(row=row_idx, column=2, sticky="w", pady=12)
+        ctk.CTkRadioButton(radio_frame, text="检测报告", variable=self.type_var, value="检测报告").pack(side="left", padx=(0, 15))
+        ctk.CTkRadioButton(radio_frame, text="鉴定报告", variable=self.type_var, value="鉴定报告").pack(side="left")
+        row_idx += 1
+
+        # 第二行：表格宽度（按需渲染）
         self.width_entry = None
         if show_width:
-            f2 = ctk.CTkFrame(self.root, fg_color="transparent")
-            f2.pack(pady=10)
-            ctk.CTkLabel(f2, text="表格宽度(%):", font=("微软雅黑", 12)).pack(side="left", padx=5)
-            self.width_entry = ctk.CTkEntry(f2, width=100)
+            ctk.CTkLabel(form_frame, text="表格宽度(%):", font=("微软雅黑", 12)).grid(row=row_idx, column=1, sticky="e", pady=12, padx=(0, 15))
+            self.width_entry = ctk.CTkEntry(form_frame, width=120)
             self.width_entry.insert(0, "95")
-            self.width_entry.pack(side="left", padx=10)
+            self.width_entry.grid(row=row_idx, column=2, sticky="w", pady=12)
+            row_idx += 1
 
-        f3 = ctk.CTkFrame(self.root, fg_color="transparent")
-        f3.pack(pady=10)
-        ctk.CTkLabel(f3, text="跳过页码:", font=("微软雅黑", 12)).pack(side="left", padx=5)
-        
-        # 定义输入框并设置占位符
-        self.skip_entry = ctk.CTkEntry(f3, placeholder_text="如: 1,2,3 (留空全排)", width=200)
-        
-        # 【核心修复 2】：注入默认实体文本。防止用户误把占位符当默认值直接点确定导致引擎瞎排前几页
-        self.skip_entry.insert(0, "1,2,3,4") 
-        
-        self.skip_entry.pack(side="left", padx=10)
+        # 第三行：跳过页码
+        ctk.CTkLabel(form_frame, text="跳过页码:", font=("微软雅黑", 12)).grid(row=row_idx, column=1, sticky="e", pady=12, padx=(0, 15))
+        self.skip_entry = ctk.CTkEntry(form_frame, placeholder_text="如: 1,2,3 (留空全排)", width=220)
+        self.skip_entry.insert(0, "1,2,3,4")
+        self.skip_entry.grid(row=row_idx, column=2, sticky="w", pady=12)
+        # --------------------------------------------------------
 
         self.btn_confirm = ctk.CTkButton(self.root, text="确定", command=self._confirm, 
                                          font=("微软雅黑", 14, "bold"), width=180, height=48)
-        self.btn_confirm.pack(pady=(30, 20))
+        self.btn_confirm.pack(pady=(20, 30))
 
     def _confirm(self):
         skips = []
-        # 获取跳过页码的逻辑保持不变
         if self.skip_entry.get().strip():
             skips = [int(p.strip()) for p in self.skip_entry.get().replace("，", ",").split(",") if p.strip().isdigit()]
         

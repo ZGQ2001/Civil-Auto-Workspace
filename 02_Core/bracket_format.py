@@ -16,7 +16,10 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from file_utils_backup import backup_current_document
 from ui_components import ModernConfirmDialog, ModernInfoDialog
 
-def process_brackets(app, doc_name):
+# 接收死锁的 target_doc 对象，而不是仅仅接收一个字符串名字
+def process_brackets(app, target_doc):
+    doc_name = target_doc.Name
+    
     # 步骤1：防呆确认弹窗
     dialog = ModernConfirmDialog(
         title="括号专项引擎启动", 
@@ -28,13 +31,13 @@ def process_brackets(app, doc_name):
 
     # 步骤2：执行统一静默备份
     print("正在调用外部模块进行静默备份...")
-    if not backup_current_document(app):
+    if not backup_current_document(target_doc):
         ModernInfoDialog("安全熔断", "⚠️ 备份模块返回失败信号！操作已终止。").show()
         return False
 
     # 步骤3：核心替换逻辑
-    doc = app.ActiveDocument
-    rng = doc.Content
+    # 【核心修改】：删除 doc = app.ActiveDocument，直接使用传入的 target_doc
+    rng = target_doc.Content
     fnd = rng.Find
     
     # 构建正则通配符替换规则集
@@ -96,7 +99,6 @@ def process_brackets(app, doc_name):
             f"- 技术参数：已转半角\n"
             f"- 规范代号：已锁定全角\n"
             f"- 层级序号：已锁定全角\n"
-            f"- 锚定排除：第() 已保留半角"
         )
         ModernInfoDialog("执行完毕", msg).show()
         return True
@@ -126,4 +128,6 @@ if __name__ == "__main__":
         if app.ActiveDocument.Path == "":
             ModernInfoDialog("操作阻断", "该文档尚未保存到本地硬盘。\n请先手动保存一次（Ctrl+S）后再执行排版引擎！").show()
         else:
-            process_brackets(app, app.ActiveDocument.Name)
+            # 在操作前立刻“死锁”内存对象并向下传递
+            target_doc = app.ActiveDocument
+            process_brackets(app, target_doc)
