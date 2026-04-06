@@ -135,7 +135,7 @@ def create_handwritten_sticker(text, box, font_path, font_size, fatigue_idx=0, t
         
         # 保留每一个边缘像素，彻底消除低像素锯齿感
         mask = ImageOps.invert(raw_img) 
-        ink_layer = Image.new("RGBA", (canvas_w, canvas_h), (35, 35, 35, 255))
+        ink_layer = Image.new("RGBA", (canvas_w, canvas_h), (35, 35, 35, 230)) # 深灰色墨水，稍微透明一点更自然
         sticker = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
         sticker.paste(ink_layer, (0, 0), mask)
         
