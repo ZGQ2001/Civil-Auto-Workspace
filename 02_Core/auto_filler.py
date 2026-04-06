@@ -1,236 +1,218 @@
 """
 ===============================================================================
-脚本名称：仿生手写记录表生成器
-功能通俗解释：
-    1. 像人一样“预判”：它不是数几个字，而是量每一个字有多少毫米（像素），
-       如果剩下的字很短，它会像人一样在格子边缘“挤一挤”写完。
-    2. 高清不模糊：采用工业级的“蒙版”技术，保证印出来的字边缘锐利，没有锯齿。
-    3. 自动填表：读取 Excel，自动换行，自动缩放，最后直接吐出一份排版完美的 PDF。
+脚本名称：仿生手写记录表生成器 (auto_filler.py)
+核心修复：
+    1. 解决空白问题：修复了 V9.4 图层叠加逻辑错误导致的文字不显示。
+    2. 小数点归位：放弃单字拆分，回归整行渲染，确保小数点老老实实待在数字下方。
+    3. 拒绝裁切：大幅增加贴纸缓冲区，并修正粘贴偏移坐标，确保长文本不再被切断。
+    4. 紧凑间距：通过 word_spacing 参数调节，实现自然紧凑的手写感。
 ===============================================================================
 """
+import os           # 处理文件路径
+import json         # 读取坐标映射
+import random       # 生成手写随机抖动
+import pandas as pd  # 处理 Excel 数据
+from PIL import Image, ImageFont, ImageOps  # 图像处理核心库
+from handright import Template, handwrite    # 仿生手写核心引擎
 
-import os           # 操作系统工具：用来处理电脑里的文件夹和文件路径
-import json         # JSON工具：用来读取你之前框选保存的坐标文件
-import random       # 随机工具：用来产生手写时的随机抖动，让每一笔都不一样
-import pandas as pd  # 数据工具：大名鼎鼎的表格处理库，专门用来读 Excel
-from PIL import Image, ImageFont, ImageOps  # 图像工具：用来贴图、写字、反转颜色
-from handright import Template, handwrite    # 手写引擎：核心技术，把电脑字变成手写体
+# ---------------- 板块 1：全局路径配置 ----------------
 
-# ---------------- 板块 1：告诉电脑文件都在哪 ----------------
-
-# 自动定位项目的主文件夹路径
+# 自动定位项目主文件夹
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+INPUT_DIR = os.path.join(BASE_DIR, "01_Input")
+OUTPUT_DIR = os.path.join(BASE_DIR, "03_Output")
 
-# 拼接各个文件夹的路径，这样写代码在任何人的电脑上都能跑通，不会因为路径报错
-INPUT_DIR = os.path.join(BASE_DIR, "01_Input")   # 放入底图和 Excel 的地方
-OUTPUT_DIR = os.path.join(BASE_DIR, "03_Output") # 生成成品 PDF 的地方
+# 文件路径
+JSON_PATH = os.path.join(INPUT_DIR, "record_mapping.json")
+BASE_IMG_PATH = os.path.join(INPUT_DIR, "记录表.png")
+EXCEL_PATH = os.path.join(INPUT_DIR, "平均值生成检测值.xlsm")
+FONT_PATH = os.path.join(INPUT_DIR, "font.ttf") 
+OUTPUT_PDF = os.path.join(OUTPUT_DIR, "自动生成_检测记录表.pdf")
 
-# 具体的各个文件身份证（路径）
-JSON_PATH = os.path.join(INPUT_DIR, "record_mapping.json")       # 坐标配置文件
-BASE_IMG_PATH = os.path.join(INPUT_DIR, "记录表.png")            # 你的空白底图
-EXCEL_PATH = os.path.join(INPUT_DIR, "平均值生成检测值.xlsm")    # 你的数据源
-FONT_PATH = os.path.join(INPUT_DIR, "font.ttf")                  # 你的手写字体文件
-OUTPUT_PDF = os.path.join(OUTPUT_DIR, "自动生成_检测记录表.pdf") # 最终生成的成品名字
+# 【目标 Sheet】：直接在这里改名字就行了，不要动其他代码了
+TARGET_SHEET = "Sheet2"
 
-# --- 核心物理微调参数 ---
-VERTICAL_DRIFT_FIX = -1.2    # 垂直修正：如果发现字越往后越压线，就把这个数调大（如-1.5）
-GLOBAL_SIZE_LIMIT = 1.45     # 全局字号放大：想让全表的字整体变大，就改这个倍数
-ITEMS_PER_PAGE = 8           # 每张纸放几个构件的数据：你的表是左4右4，所以是8个
+# --- 仿生视觉参数微调 ---
+VERTICAL_DRIFT_FIX = -1.5   # 全局上下移动（负数上移，正数下移）
+GLOBAL_SIZE_LIMIT = 1.48    # 全局字号放大倍数
+ITEMS_PER_PAGE = 8          # 每张纸放 8 组数据
 
-# ---------------- 板块 2：功能函数（电脑的“大脑”逻辑） ----------------
+# ---------------- 板块 2：仿生引擎核心函数 ----------------
 
 def load_config():
-    """这个函数负责把 JSON 里的坐标读出来，并计算出每个格子该挪多远"""
+    """读取 JSON 里的坐标和字号信息"""
     with open(JSON_PATH, 'r', encoding='utf-8') as f:
-        cfg = json.load(f)  # 打开并读取 JSON 文件内容
+        cfg = json.load(f)
     
-    # 将 Excel 里的列名和你框选的坐标名字一一对应
+    # 将 Excel 字段映射到 JSON 里的框选区域
     base_boxes = {
-        "name": cfg["构件名称"]["box"], # 对应构件名称的大格子
-        "val1": cfg["测点1"]["box"],   # 对应实测值1的小格子
-        "val2": cfg["测点2"]["box"],   # 对应实测值2的小格子
-        "val3": cfg["测点3"]["box"],   # 对应实测值3的小格子
-        "avg": cfg["平均值"]["box"]     # 对应平均值格子
+        "name": cfg["构件名称"]["box"],
+        "val1": cfg["测点1"]["box"],
+        "val2": cfg["测点2"]["box"],
+        "val3": cfg["测点3"]["box"],
+        "avg": cfg["平均值"]["box"]
     }
+    # 计算向右(dx)和向下(dy)跨步的距离
+    dx = cfg["右"]["box"][0] - cfg["构件名称"]["box"][0]
+    dy = (cfg["下"]["box"][1] - cfg["构件名称"]["box"][1]) + VERTICAL_DRIFT_FIX
     
-    # 计算“跨步”距离：第1个构件到右边、下边格子的像素差
-    dx = cfg["右"]["box"][0] - cfg["构件名称"]["box"][0] # 向右挪多远
-    dy = (cfg["下"]["box"][1] - cfg["构件名称"]["box"][1]) + VERTICAL_DRIFT_FIX # 向下挪多远
-    
-    # 计算最终要用的基准字号
+    # 算出最终字号
     font_size = int(cfg["构件名称"].get("font_size", 35) * GLOBAL_SIZE_LIMIT)
-    
     return base_boxes, dx, dy, font_size
 
-def create_handwritten_image(text, box, font_path, font_size):
-    """这是全脚本最聪明的地方：它负责把一段话变成一张带手写感的透明贴纸"""
-    
-    # 获取格子的宽度和高度像素
+def create_handwritten_sticker(text, box, font_path, font_size, fatigue_idx=0, total_items=1):
+    """
+    仿生渲染核心：负责把文字变成一张高清、抗锯齿、带随机抖动的透明贴纸。
+    """
     w, h = int(box[2]), int(box[3])
-    clean_text = str(text).strip() # 去掉文字前后的空格
+    clean_text = str(text).strip()
     
-    # 如果 Excel 里这格是空的，就直接返回一张透明的空图
+    # 如果没数据，返回空图
     if clean_text in ['nan', 'None', '']:
-        return Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        return Image.new("RGBA", (1, 1), (0, 0, 0, 0))
 
-    current_size = font_size # 先用标准字号试试
-    final_wrapped_text = ""  # 准备存放换行后的文字
+    # 计算“写累了”的疲劳系数
+    fatigue_boost = min(1.3, 1.0 + (fatigue_idx / total_items))
     
-    # --- 阶段 A：物理长度排版决策（核心 AI 逻辑） ---
-    # 如果字号太大塞不下，这个循环会让字号一点点变小，直到塞进去为止
+    current_size = font_size
+    final_wrapped_text = ""
+    
+    # --- 阶段 A：智能排版逻辑 (挤一挤 -> 换行 -> 缩字号) ---
     while current_size > 10:
-        font = ImageFont.truetype(font_path, current_size) # 加载当前字号的字体
-        
-        # 1. 测量这串字的总物理长度（单位是像素）
-        full_width = font.getlength(clean_text)
-        
-        # 【仿生挤字逻辑】：如果全长只比格子宽了 20% 以内，人通常会选择“挤一挤”不换行
-        if full_width <= (w * 1.20):
+        font = ImageFont.truetype(font_path, current_size)
+        # 如果长度超出不多（允许 20% 溢出），强行一行写完，这最像真人
+        if font.getlength(clean_text) <= (w * 1.20):
             final_wrapped_text = clean_text
-            final_lines_count = 1
-            break # 决定了，不换行！
-            
-        # 2. 如果实在太长，开始计算在哪里折行
+            lines_count = 1
+            break
+        
+        # 否则尝试换行
         lines = []
-        current_line = ""
-        chars = list(clean_text)
-        
-        for i, char in enumerate(chars):
-            test_line = current_line + char
-            test_w = font.getlength(test_line) # 量一量加上这个字后的长度
-            
-            # 预判：看看剩下的字还有多长？
-            remaining_text = "".join(chars[i+1:])
-            remaining_w = font.getlength(remaining_text)
-            
-            # 如果当前行写满了
-            if test_w > w:
-                # 【预判挤字】：如果剩下的字总长度小于 40 像素（大概 1-2 个字），人会硬挤在这一行写完
-                if remaining_w < 40: 
-                    current_line = test_line
-                    continue
-                else:
-                    # 剩下的字还挺多，老老实实换行吧
-                    if current_line: lines.append(current_line)
-                    current_line = char
+        cur_line = ""
+        for char in clean_text:
+            if font.getlength(cur_line + char) <= (w * 1.1):
+                cur_line += char
             else:
-                current_line = test_line # 还没满，继续写
-                
-        if current_line: lines.append(current_line)
+                if cur_line: lines.append(cur_line)
+                cur_line = char
+        lines.append(cur_line)
         
-        # 3. 检查换行后的总高度有没有超出格子
+        # 检查换行后的高度
         line_h = int(current_size * 1.15)
-        if (len(lines) * line_h) <= (h + 6):
+        if (len(lines) * line_h) <= (h + 10):
             final_wrapped_text = "\n".join(lines)
-            final_lines_count = len(lines)
-            break # 换行成功，高度也合适！
-            
-        current_size -= 2 # 换了行还太高？那就把字号变小一点再重来
+            lines_count = len(lines)
+            break
+        current_size -= 2 # 实在塞不下才把字写小
     else:
-        # 万一字号缩到最小还不行，就强制用 12 号字单行显示
-        final_wrapped_text, final_lines_count, current_size = clean_text, 1, 12
+        final_wrapped_text, lines_count, current_size = clean_text, 1, 12
         font = ImageFont.truetype(font_path, 12)
 
-    # --- 阶段 B：高保真去锯齿渲染（让字变清晰） ---
-    
-    # 为了防止手写的笔画勾到格子外面被切断，我们先把贴纸画布做大一点
-    canvas_w, canvas_h = w + 200, h + 40
-    bg = Image.new("L", (canvas_w, canvas_h), 255) # 创建一张纯白底色图
+    # --- 阶段 B：高清抗锯齿渲染 (解决像素低、锯齿重的问题) ---
+    # 创建超大画布，防止笔画被切断
+    canvas_w, canvas_h = w + 200, h + 150
+    bg = Image.new("L", (canvas_w, canvas_h), 255) # 灰度画布
     
     # 计算文字在格子里的垂直居中位置
-    total_h = final_lines_count * int(current_size * 1.15)
-    top_pos = (h - total_h) // 2
-    
-    # 设置手写模板参数：让每一格的字都有微小的旋转、抖动和间距变化
+    total_text_h = lines_count * int(current_size * 1.15)
+    top_pos = (canvas_h - total_text_h) // 2
+
+    # 设置手写引擎参数
     template = Template(
         background=bg, font=font, line_spacing=int(current_size * 1.15),
-        fill=0, # 这里的 0 代表纯黑墨水
-        left_margin=8, top_margin=top_pos + 20, # 给左边留点缝，模拟人写字不贴边
-        word_spacing=-1, # 字间距紧凑一点更自然
-        line_spacing_sigma=1, font_size_sigma=1, word_spacing_sigma=1, # 抖动参数
-        perturb_x_sigma=1.5, perturb_y_sigma=1, perturb_theta_sigma=0.03 # 笔画偏移和旋转
+        fill=0, # 渲染黑字
+        left_margin=100, top_margin=top_pos, # 100 是为了在超大画布中心书写
+        word_spacing=-2, # 【关键】：设置负间距，让字迹更紧凑自然
+        line_spacing_sigma=1.0, font_size_sigma=1.1, word_spacing_sigma=1.2,
+        perturb_x_sigma=1.5 * fatigue_boost, 
+        perturb_y_sigma=1.2 * fatigue_boost, 
+        perturb_theta_sigma=0.04 * fatigue_boost
     )
     
     try:
-        # 调用核心引擎，把字“写”出来
+        # 渲染原始笔触
         raw_img = list(handwrite(final_wrapped_text, template))[0]
         
-        # 【关键技术：蒙版粘贴】：
-        # 这一步不是简单的抠图，而是把文字的深浅直接变成透明度。
-        # 这样能保留字体边缘最细微的“羽化”效果，印出来才像真的墨水，不模糊。
-        mask = ImageOps.invert(raw_img) # 把黑字白底反转成白字黑底
-        ink_layer = Image.new("RGBA", (canvas_w, canvas_h), (35, 35, 35, 255)) # 准备深灰色的墨水层
-        sticker = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))        # 准备全透明的底图
-        sticker.paste(ink_layer, (0, 0), mask) # 隔着蒙版把墨水“刷”上去
-        return sticker # 返回这张做好的“手写贴纸”
+        # 保留每一个边缘像素，彻底消除低像素锯齿感
+        mask = ImageOps.invert(raw_img) 
+        ink_layer = Image.new("RGBA", (canvas_w, canvas_h), (35, 35, 35, 255))
+        sticker = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
+        sticker.paste(ink_layer, (0, 0), mask)
+        
+        return sticker
     except:
-        # 出错时的兜底方案，返回空白
-        return Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        return Image.new("RGBA", (1, 1), (0, 0, 0, 0))
 
-# ---------------- 板块 3：主程序流程（开始干活） ----------------
+# ---------------- 板块 3：主程序自动化流程 ----------------
 
 def main():
-    # 如果还没建输出文件夹，就建一个
+    # 准备输出环境
     if not os.path.exists(OUTPUT_DIR): os.makedirs(OUTPUT_DIR)
     
-    # 1. 第一步：加载所有的坐标和配置
+    print(f"🚀 正在启动 ...")
     base_boxes, dx, dy, final_font_size = load_config()
     
-    # 2. 第二步：读取 Excel 数据，专门指定读取 Sheet2
-    df = pd.read_excel(EXCEL_PATH, sheet_name="Sheet2", header=None, engine='openpyxl')
-    # 【高亮】：ffill() 会处理 Excel 里的合并单元格，把空缺的名字自动补齐
-    df[0] = df[0].ffill() 
+    # 读取 Excel 数据，指定 Sheet2
+    df = pd.read_excel(EXCEL_PATH, sheet_name=TARGET_SHEET, header=None, engine='openpyxl')
+    df[0] = df[0].ffill() # 处理合并单元格
     
-    # 将 Excel 里的原始数据每 4 行打包成一个“构件对象”
+    # 1. 准备一个空的“总清单”，用来存放后面整理出来的构件数据包。
     items = []
+
+# 2. 开启核心循环：从第 0 行开始，到表格结束，每次“跨步”跳过 4 行走。
+#    为什么要跳 4 行？因为 Excel 里每 4 行才构成一个完整的检测单元。
     for i in range(0, len(df), 4):
-        if i + 3 >= len(df): break # 防止表格末尾有残缺行
-        chunk = df.iloc[i:i+4] # 截取这 4 行
+
+    # 3. 安全卫士：检查剩下的行数还够不够 4 行。
+    #    如果剩下的行数凑不齐 4 行了，说明数据已经拿完了，直接跳出循环，防止电脑报错。
+        if i + 3 >= len(df): break
+
+    # 4. 裁切动作：从总表里精准地把这连着的 4 行数据整体抠出来，存入临时变量 chunk（小块）中。
+        chunk = df.iloc[i:i+4]
+
+    # 5. 组装动作：从抠出来的这 4 行里，按照坐标位置提取精华，打包成一个“身份卡”存入清单。
         items.append({
-            "name": chunk.iloc[0, 0], # 构件名字
-            "val1": chunk.iloc[0, 2], # 数据1
-            "val2": chunk.iloc[1, 2], # 数据2
-            "val3": chunk.iloc[2, 2], # 数据3
-            "avg":  chunk.iloc[3, 2]  # 平均值
+        "name": chunk.iloc[0, 0], # 拿第 1 行、第 1 列的数据，也就是“构件名称”
+        "val1": chunk.iloc[0, 2], # 拿第 1 行、第 3 列的数据，也就是“实测值 1”
+        "val2": chunk.iloc[1, 2], # 拿第 2 行、第 3 列的数据，也就是“实测值 2”
+        "val3": chunk.iloc[2, 2], # 拿第 3 行、第 3 列的数据，也就是“实测值 3”
+        "avg":  chunk.iloc[3, 2]  # 拿第 4 行、第 3 列的数据，也就是最后的“平均值”
         })
     
-    pages = [] # 用来存放每一页做好的图片
-    current_page_img = None # 当前正在画的那一页
+    total_count = len(items)
+    pages = []
+    current_page_img = None
     
-    # 遍历处理每一个构件数据
+    # 循环填表
     for idx, item in enumerate(items):
-        # 确定这个构件在这一页的哪个位置 (0到7)
         pos_index = idx % ITEMS_PER_PAGE
         
-        # 如果当前位置是 0，说明要新开一张纸了
+        # 换页逻辑
         if pos_index == 0:
-            if current_page_img: pages.append(current_page_img.convert('RGB')) # 把画好的前一页存起来
-            current_page_img = Image.open(BASE_IMG_PATH).convert('RGBA') # 拿出一张新的空白底图
-            print(f"📄 正在生成第 {len(pages) + 1} 页...")
+            if current_page_img: pages.append(current_page_img.convert('RGB'))
+            current_page_img = Image.open(BASE_IMG_PATH).convert('RGBA')
+            print(f"📄 正在合成第 {len(pages) + 1} 页 ...")
             
-        # 计算当前格子相对于基准格子的平移量
-        col, row = pos_index % 2, pos_index // 2 # 算出它是第几列、第几行
-        cur_dx, cur_dy = col * dx, row * dy     # 算出要挪动的像素值
+        col, row = pos_index % 2, pos_index // 2
+        cur_dx, cur_dy = col * dx, row * dy
         
-        # 遍历需要填写的 5 个格子（名称、三个实测、平均值）
         for key in ["name", "val1", "val2", "val3", "avg"]:
-            bx, by, bw, bh = base_boxes[key] # 获取基础位置
-            tx, ty = int(bx + cur_dx), int(by + cur_dy) # 计算在这一页的具体坐标
+            bx, by, bw, bh = base_boxes[key]
+            tx, ty = int(bx + cur_dx), int(by + cur_dy)
             
-            # 调用之前的“大脑”，做出这张手写贴纸
-            sticker = create_handwritten_image(item[key], [tx, ty, bw, bh], FONT_PATH, final_font_size)
+            # 生成完美的贴纸
+            sticker = create_handwritten_sticker(item[key], [tx, ty, bw, bh], FONT_PATH, final_font_size, idx, total_count)
             
-            # 把贴纸啪地一下贴到底图上。ty-20 是因为我们做贴纸时画布多留了 20 像素的余量
-            current_page_img.paste(sticker, (tx, ty - 20), sticker)
+            # 【重要修正】：粘贴坐标偏移对齐
+            # 因为贴纸画布左右多加了 100 像素，上下多加了 75 像素（中心点对齐）
+            # 所以粘贴时要往回挪 100 和 75，才能让字落在格子正中
+            current_page_img.paste(sticker, (tx - 100, ty - 75), sticker)
             
-    # 处理最后一页数据
+    # 保存成品 PDF
     if current_page_img: pages.append(current_page_img.convert('RGB'))
-    
-    # 3. 第三步：把所有画好的图片叠在一起，保存成多页 PDF
     if pages:
         pages[0].save(OUTPUT_PDF, save_all=True, append_images=pages[1:], resolution=300)
-        print(f"🎉 任务完美结束！请去这里看结果：{OUTPUT_PDF}")
+        print(f"结束！请查收：{OUTPUT_PDF}")
 
-# 程序启动入口
 if __name__ == "__main__":
     main()
