@@ -3,8 +3,12 @@
 脚本名称：主程序控制台入口 (main.py)
 作者: ZGQ
 功能概述：
-    统一启动面板。
-    负责调度和异步唤醒各个独立的自动化子模块。
+    v0.1.1 - 2024-06-15
+    - 初始版本，提供一个统一的启动面板。
+    - 负责调度和异步唤醒各个独立的自动化子模块。
+    - 每个按钮对应一个独立的 Python 脚本，点击后会在后台启动对应的功能模块。
+    - 设计简洁，易于扩展，后续可以添加更多功能模块。
+    - 使用 customtkinter 提供现代化的 UI 体验。
 ===============================================================================
 """
 
@@ -16,8 +20,8 @@ import customtkinter as ctk
 class MainDashboard:
     def __init__(self, root):
         self.root = root
-        self.root.title("工程自动化程序 V0.1.0")
-        self.root.geometry("450x520")
+        self.root.title("工程自动化程序 V0.1.1 - 主控制台")
+        self.root.geometry("450x600")
         self.root.resizable(False, False)
         
         # 顶部标题区
@@ -36,6 +40,8 @@ class MainDashboard:
             ("全局括号半全角纠偏", "bracket_format.py"),
             ("交叉引用格式修复", "fix_cross_ref.py"),
             ("文档转换小工具", "word2pdf.py"),
+            ("PNG坐标选择器", "coord_picker.py"),
+            ("手写模拟小工具", "auto_filler.py"),
         ]
 
         for text, script in modules:
