@@ -34,7 +34,7 @@ TARGET_SHEET = "Sheet2"
 
 # --- 仿生视觉参数微调 ---
 VERTICAL_DRIFT_FIX = -1.5   # 全局上下移动（负数上移，正数下移）
-GLOBAL_SIZE_LIMIT = 1.48    # 全局字号放大倍数
+GLOBAL_SIZE_LIMIT = 1.68    # 全局字号放大倍数
 ITEMS_PER_PAGE = 8          # 每张纸放 8 组数据
 
 # ---------------- 板块 2：仿生引擎核心函数 ----------------
@@ -68,24 +68,18 @@ def create_handwritten_sticker(text, box, fonts_dir, font_size, fatigue_idx=0, t
     if clean_text in ['nan', 'None', '']:
         return Image.new("RGBA", (1, 1), (0, 0, 0, 0))
 
-    # 动态扫描文件夹，加载所有的 .ttf 或 .otf
     font_files = [os.path.join(fonts_dir, f) for f in os.listdir(fonts_dir) if f.endswith(('.ttf', '.otf'))]
     if not font_files:
         raise ValueError("报错啦：01_Input/fonts 文件夹中没有找到任何字体文件！")
-
-    # 【核心修正：单元格盲盒】
-    # 既然引擎不支持一堆字体，我们就在每次生成一个格子时，随机从池子里抽1个字体！
-    chosen_font_path = random.choice(font_files)
 
     fatigue_boost = min(1.3, 1.0 + (fatigue_idx / total_items))
     current_size = font_size
     final_wrapped_text = ""
     
     # --- 阶段 A：智能排版逻辑 ---
+    # 先用第一个字体作为“基准尺子”把合适的字号算出来
     while current_size > 10:
-        # 使用抽中的那个字体对象来测算宽度
-        font_ruler = ImageFont.truetype(chosen_font_path, current_size)
-        
+        font_ruler = ImageFont.truetype(font_files[0], current_size)
         if font_ruler.getlength(clean_text) <= (w * 1.20):
             final_wrapped_text = clean_text
             lines_count = 1
@@ -109,8 +103,53 @@ def create_handwritten_sticker(text, box, fonts_dir, font_size, fatigue_idx=0, t
         current_size -= 2 
     else:
         final_wrapped_text, lines_count, current_size = clean_text, 1, 12
-        # 如果走到最后，别忘了也要给 font_ruler 赋值
-        font_ruler = ImageFont.truetype(chosen_font_path, 12)
+
+    # =========== 【核心炸墙操作：单字盲盒底层劫持】 ===========
+    
+    # 1. 把所有字体按最终字号全部加载成弹药库
+    multi_fonts = [ImageFont.truetype(f, current_size) for f in font_files]
+    
+    # 2. 拿第一个字体作为“傀儡”传给引擎，避免引擎报错
+    font_ruler = multi_fonts[0]
+    
+    # 3. 拦截底层渲染方法：每次底层准备画一个单字时，随机返回弹药库里一个字体的像素
+    # =========== 【核心炸墙操作：单字盲盒底层劫持】 ===========
+    multi_fonts = [ImageFont.truetype(f, current_size) for f in font_files]
+    font_ruler = multi_fonts[0]
+    
+    # 【新增记忆变量】：记住刚刚写上一笔用的是哪支笔
+    last_used_font = None 
+
+    def random_getmask2(text, mode="", *args, **kwargs):
+        nonlocal last_used_font # 声明我们要修改外面的记忆变量
+        
+        # 核心逻辑：从抽奖池里，把上次用的那支笔拿出去（除非你只有1个字体）
+        available_fonts = [f for f in multi_fonts if f != last_used_font]
+        if not available_fonts:
+            available_fonts = multi_fonts
+            
+        # 从剩下的笔里面抽，确保100%不一样
+        chosen = random.choice(available_fonts)
+        last_used_font = chosen # 更新记忆
+        return chosen.getmask2(text, mode=mode, *args, **kwargs)
+        
+    def random_getmask(text, mode="", *args, **kwargs):
+        nonlocal last_used_font
+        available_fonts = [f for f in multi_fonts if f != last_used_font]
+        if not available_fonts:
+            available_fonts = multi_fonts
+        chosen = random.choice(available_fonts)
+        last_used_font = chosen
+        return chosen.getmask(text, mode=mode, *args, **kwargs)
+
+    font_ruler.getmask2 = random_getmask2
+    font_ruler.getmask = random_getmask
+    # =========================================================================
+
+    # 强行替换掉傀儡字体的底层方法
+    font_ruler.getmask2 = random_getmask2
+    font_ruler.getmask = random_getmask
+    # =========================================================================
 
     # --- 阶段 B：物理墨水渲染 ---
     canvas_w, canvas_h = w + 200, h + 150
@@ -118,27 +157,29 @@ def create_handwritten_sticker(text, box, fonts_dir, font_size, fatigue_idx=0, t
     total_text_h = lines_count * int(current_size * 1.15)
     top_pos = (canvas_h - total_text_h) // 2
 
-    # 引擎参数设置
+    # 引擎参数设置：释放被压制的随机性，让单字彻底抖起来！
     template = Template(
         background=bg, 
-        font=font_ruler,  # 【关键修复】：老老实实传回单个字体对象！
+        font=font_ruler,  # 传入我们的“傀儡”字体
         line_spacing=int(current_size * 1.15),
         fill=0, 
         left_margin=100, top_margin=top_pos, 
         word_spacing=-2, 
         line_spacing_sigma=1.0,               
-        font_size_sigma=1.03,                 
-        word_spacing_sigma=1.5,               
-        perturb_x_sigma=1.2 * fatigue_boost,  
-        perturb_y_sigma=1.4 * fatigue_boost,  
-        perturb_theta_sigma=0.02 * fatigue_boost 
+        
+        # 【全量释放随机感】
+        font_size_sigma=current_size * 0.08,  # 字号大小随机波动（约8%）
+        word_spacing_sigma=1.5,               # 字距随机波动
+        perturb_x_sigma=1.5 * fatigue_boost,  # 左右位移波动
+        perturb_y_sigma=1.0 * fatigue_boost,  # 上下位移波动
+        perturb_theta_sigma=0.06 * fatigue_boost # 允许文字产生倒歪倾斜
     )
     
     try:
         raw_img = list(handwrite(final_wrapped_text, template))[0]
         mask = ImageOps.invert(raw_img) 
         
-        # 物理滤镜
+        # 物理渗墨滤镜
         mask = mask.filter(ImageFilter.GaussianBlur(radius=0.4)) 
         ink_layer = Image.new("RGBA", (canvas_w, canvas_h), (40, 45, 50, 235)) 
         
