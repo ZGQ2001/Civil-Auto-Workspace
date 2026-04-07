@@ -15,6 +15,18 @@ import pandas as pd
 from PIL import Image, ImageFont, ImageOps, ImageFilter
 from handright import Template, handwrite
 
+# ==================== 【黑科技：全局高速缓存】 ====================
+# 用于存放已经加载好的字体，避免重复扫描硬盘，大幅提升初始化速度
+_FONT_POOL_CACHE = {}
+_LAST_USED_FONT_FILE = None # 记录全局上一笔用的字体文件路径，实现跨格不撞衫
+
+def get_cached_fonts(font_files, size):
+    """内存池：相同字号的字体只会在第一次使用时加载"""
+    if size not in _FONT_POOL_CACHE:
+        # 一次性装填所有弹药，后续直接调用
+        _FONT_POOL_CACHE[size] = [ImageFont.truetype(f, size) for f in font_files]
+    return _FONT_POOL_CACHE[size]
+# =================================================================
 # ==================== 工具函数：智能坐标翻译 ====================
 def parse_excel_coord(coord_str):
     """
@@ -92,26 +104,33 @@ def create_handwritten_sticker(text, box, fonts_dir, base_font_size, spacing, fa
     last_used_font = None 
 
     # 4. 彻底还原你以前的、没有任何冗余检查的极简抽签逻辑
-    def random_getmask2(char_text, mode="", *args, **kwargs):
-        nonlocal last_used_font
-        available_fonts = [f for f in multi_fonts if f != last_used_font]
-        if not available_fonts:
-            available_fonts = multi_fonts
-        chosen = random.choice(available_fonts)
-        last_used_font = chosen
-        return chosen.getmask2(char_text, mode=mode, *args, **kwargs)
+    # 2. 【闪电加载】：直接从内存缓存中获取字体对象
+    multi_fonts = get_cached_fonts(font_files, current_size)
+    font_ruler = ImageFont.truetype(font_files[0], current_size)
 
+    # 3. 【核心修正】：分别拦截 getmask 和 getmask2，确保数据格式 100% 正确
     def random_getmask(char_text, mode="", *args, **kwargs):
-        nonlocal last_used_font
-        available_fonts = [f for f in multi_fonts if f != last_used_font]
-        if not available_fonts:
-            available_fonts = multi_fonts
-        chosen = random.choice(available_fonts)
-        last_used_font = chosen
-        return chosen.getmask(char_text, mode=mode, *args, **kwargs)
+        global _LAST_USED_FONT_FILE
+        # 排除掉上一笔用过的字体文件路径
+        available = [f for f in multi_fonts if f.path != _LAST_USED_FONT_FILE]
+        if not available: available = multi_fonts
+        
+        chosen = random.choice(available)
+        _LAST_USED_FONT_FILE = chosen.path 
+        return chosen.getmask(char_text, mode=mode, *args, **kwargs) # 返回单个 mask
 
-    font_ruler.getmask2 = random_getmask2
+    def random_getmask2(char_text, mode="", *args, **kwargs):
+        global _LAST_USED_FONT_FILE
+        available = [f for f in multi_fonts if f.path != _LAST_USED_FONT_FILE]
+        if not available: available = multi_fonts
+        
+        chosen = random.choice(available)
+        _LAST_USED_FONT_FILE = chosen.path 
+        return chosen.getmask2(char_text, mode=mode, *args, **kwargs) # 返回 (mask, offset)
+
+    # 分别挂载，互不干扰
     font_ruler.getmask = random_getmask
+    font_ruler.getmask2 = random_getmask2
     # =========================================================
 
     # === 恢复旧版的动态居中锚点计算 ===

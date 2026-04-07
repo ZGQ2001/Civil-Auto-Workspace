@@ -1,11 +1,11 @@
 {
-    "excel_path": "",
-    "json_path": "",
-    "img_path": "",
-    "font_dir": "",
-    "output_dir": "",
+    "excel_path": "D:/01_VC CODE/Civil_Auto_Workspace/01_Input/平均值生成检测值.xlsm",
+    "json_path": "D:/01_VC CODE/Civil_Auto_Workspace/01_Input/record_mapping.json",
+    "img_path": "D:/01_VC CODE/Civil_Auto_Workspace/01_Input/记录表.png",
+    "font_dir": "D:/01_VC CODE/Civil_Auto_Workspace/01_Input/fonts",
+    "output_dir": "D:/01_VC CODE/Civil_Auto_Workspace/03_Output",
     "sheet_name": "Sheet2",
     "font_scale": 1.68,
-    "y_offset": -1.5,
-    "spacing": -5
+    "y_offset": -1.11,
+    "spacing": -2
 }
