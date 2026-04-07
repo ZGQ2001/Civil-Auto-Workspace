@@ -7,6 +7,9 @@
 ===============================================================================
 """
 import customtkinter as ctk
+import os
+import json
+from tkinter import filedialog
 
 # 全局基础设置
 ctk.set_appearance_mode("System")
@@ -224,3 +227,187 @@ class ModernParamDialog(BaseDialog):
         self.root.grab_set()
         self.root.master.wait_window(self.root)
         return self.params
+    
+class ModernHandwriteDialog(BaseDialog):
+    """现代仿生手写生成器主控面板"""
+    def __init__(self, title="仿生手写配置台"):
+        # 弹窗尺寸需要比普通参数面板大，因为配置项很多
+        super().__init__(title, 750, 800)
+        self.config_data = None # 用于存储最终点击“下一步”时返回的数据
+        
+        # 配置文件保存路径（存放在代码同级目录）
+        self.config_file = "handwrite_config.json"
+
+        # 【核心变量绑定】：必须绑定 master=self.root，防止变量脱离作用域导致报错或数据不更新
+        self.var_excel_path = ctk.StringVar(master=self.root)
+        self.var_json_path = ctk.StringVar(master=self.root)
+        self.var_img_path = ctk.StringVar(master=self.root)
+        self.var_font_dir = ctk.StringVar(master=self.root)
+        self.var_output_dir = ctk.StringVar(master=self.root)
+        
+        self.var_sheet_name = ctk.StringVar(master=self.root, value="Sheet2")
+        self.var_font_scale = ctk.DoubleVar(master=self.root, value=1.68)
+        self.var_y_offset = ctk.DoubleVar(master=self.root, value=-1.5)
+        self.var_spacing = ctk.IntVar(master=self.root, value=-5)
+
+        self._build_ui()
+        self.load_config() # 启动时自动读取上次配置
+
+    def _build_ui(self):
+        """构建界面的总指挥"""
+        # ================= 板块 1：文件与路径配置 =================
+        frame_files = ctk.CTkFrame(self.root, corner_radius=10)
+        frame_files.pack(pady=15, padx=20, fill="x")
+        
+        ctk.CTkLabel(frame_files, text="📂 核心文件配置", font=("微软雅黑", 15, "bold")).pack(pady=(15, 5))
+
+        self._add_file_selector(frame_files, "Excel 数据源:", self.var_excel_path, file_types=[("Excel", "*.xlsx *.xlsm")])
+        self._add_file_selector(frame_files, "JSON 坐标库:", self.var_json_path, file_types=[("JSON", "*.json")])
+        self._add_file_selector(frame_files, "空白底图文件:", self.var_img_path, file_types=[("图片", "*.png *.jpg")])
+        self._add_dir_selector(frame_files, "手写字体目录:", self.var_font_dir)
+        self._add_dir_selector(frame_files, "PDF 输出目录:", self.var_output_dir)
+
+        # ================= 板块 2：全局视觉参数 =================
+        frame_params = ctk.CTkFrame(self.root, corner_radius=10)
+        frame_params.pack(pady=10, padx=20, fill="x")
+        
+        ctk.CTkLabel(frame_params, text="🎨 全局视觉微调", font=("微软雅黑", 15, "bold")).pack(pady=(15, 5))
+
+        self._add_entry_row(frame_params, "目标 Sheet 名称:", self.var_sheet_name)
+        self._add_slider_row(frame_params, "全局字号缩放 (倍):", self.var_font_scale, 1.0, 2.5)
+        self._add_slider_row(frame_params, "纵向偏移补偿 (px):", self.var_y_offset, -15.0, 15.0)
+        self._add_slider_row(frame_params, "字距收缩程度:", self.var_spacing, -15, 5, is_int=True)
+
+        # ================= 板块 3：状态管理与执行 =================
+        frame_actions = ctk.CTkFrame(self.root, fg_color="transparent")
+        frame_actions.pack(pady=20, fill="x")
+
+        btn_save = ctk.CTkButton(frame_actions, text="💾 保存参数配置", width=140, command=self.save_config)
+        btn_save.pack(side="left", padx=(40, 10))
+
+        btn_load = ctk.CTkButton(frame_actions, text="🔄 重新加载配置", width=140, fg_color="#F39C12", hover_color="#D68910", command=self.load_config)
+        btn_load.pack(side="left", padx=10)
+
+        # 第一阶段的终点，点击进入第二阶段（返回收集到的数据）
+        btn_next = ctk.CTkButton(frame_actions, text="下一步：配置数据映射 ➡️", width=180, 
+                                 fg_color="#27AE60", hover_color="#1E8449", command=self._confirm)
+        btn_next.pack(side="right", padx=(10, 40))
+
+    # ---------------- 辅助构建方法 ----------------
+    def _add_file_selector(self, parent, label_text, string_var, file_types):
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", pady=6, padx=15)
+        ctk.CTkLabel(row, text=label_text, width=110, anchor="e", font=("微软雅黑", 12)).pack(side="left", padx=(0, 10))
+        entry = ctk.CTkEntry(row, textvariable=string_var, state="readonly") 
+        entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        btn = ctk.CTkButton(row, text="浏览", width=60, command=lambda: self._browse_file(string_var, file_types))
+        btn.pack(side="right")
+
+    def _add_dir_selector(self, parent, label_text, string_var):
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", pady=6, padx=15)
+        ctk.CTkLabel(row, text=label_text, width=110, anchor="e", font=("微软雅黑", 12)).pack(side="left", padx=(0, 10))
+        entry = ctk.CTkEntry(row, textvariable=string_var, state="readonly")
+        entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        btn = ctk.CTkButton(row, text="选择", width=60, command=lambda: self._browse_dir(string_var))
+        btn.pack(side="right")
+
+    def _add_entry_row(self, parent, label_text, string_var):
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", pady=8, padx=15)
+        ctk.CTkLabel(row, text=label_text, width=120, anchor="e", font=("微软雅黑", 12)).pack(side="left", padx=(0, 10))
+        ctk.CTkEntry(row, textvariable=string_var, width=150).pack(side="left")
+
+    def _add_slider_row(self, parent, label_text, var, min_val, max_val, is_int=False):
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", pady=8, padx=15)
+        ctk.CTkLabel(row, text=label_text, width=120, anchor="e", font=("微软雅黑", 12)).pack(side="left", padx=(0, 10))
+        val_label = ctk.CTkLabel(row, text=str(var.get()), width=40)
+        val_label.pack(side="right", padx=(10, 0))
+
+        def slider_callback(value):
+            final_val = int(value) if is_int else round(value, 2)
+            var.set(final_val)
+            val_label.configure(text=str(final_val))
+
+        slider = ctk.CTkSlider(row, from_=min_val, to=max_val, variable=var, command=slider_callback)
+        slider.pack(side="left", fill="x", expand=True)
+
+    # ---------------- 业务逻辑方法 ----------------
+    def _browse_file(self, string_var, file_types):
+        # 注意：这里需要确保弹出的系统文件框依然在顶层
+        self.root.attributes('-topmost', False) 
+        path = filedialog.askopenfilename(filetypes=file_types)
+        self.root.attributes('-topmost', True)
+        if path:
+            string_var.set(path)
+
+    def _browse_dir(self, string_var):
+        self.root.attributes('-topmost', False)
+        path = filedialog.askdirectory()
+        self.root.attributes('-topmost', True)
+        if path:
+            string_var.set(path)
+
+    def save_config(self):
+        config = {
+            "excel_path": self.var_excel_path.get(),
+            "json_path": self.var_json_path.get(),
+            "img_path": self.var_img_path.get(),
+            "font_dir": self.var_font_dir.get(),
+            "output_dir": self.var_output_dir.get(),
+            "sheet_name": self.var_sheet_name.get(),
+            "font_scale": self.var_font_scale.get(),
+            "y_offset": self.var_y_offset.get(),
+            "spacing": self.var_spacing.get()
+        }
+        try:
+            with open(self.config_file, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=4, ensure_ascii=False)
+            print("配置已保存！") # 后续这里可以接你现成的 ModernInfoDialog
+        except Exception as e:
+            print(f"保存失败: {e}")
+
+    def load_config(self):
+        if os.path.exists(self.config_file):
+            try:
+                with open(self.config_file, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                self.var_excel_path.set(config.get("excel_path", ""))
+                self.var_json_path.set(config.get("json_path", ""))
+                self.var_img_path.set(config.get("img_path", ""))
+                self.var_font_dir.set(config.get("font_dir", ""))
+                self.var_output_dir.set(config.get("output_dir", ""))
+                self.var_sheet_name.set(config.get("sheet_name", "Sheet2"))
+                self.var_font_scale.set(config.get("font_scale", 1.68))
+                self.var_y_offset.set(config.get("y_offset", -1.5))
+                self.var_spacing.set(config.get("spacing", -5))
+            except Exception as e:
+                pass
+
+    def _confirm(self):
+        """点击下一步时，收集所有参数并销毁当前弹窗"""
+        # 前置校验：必须选择 JSON，因为下一步严重依赖它
+        if not self.var_json_path.get() or not os.path.exists(self.var_json_path.get()):
+            # 可以在这里调出你的 ModernInfoDialog 提示用户
+            return
+
+        # 把所有数据打包成字典
+        self.config_data = {
+            "excel_path": self.var_excel_path.get(),
+            "json_path": self.var_json_path.get(),
+            "img_path": self.var_img_path.get(),
+            "font_dir": self.var_font_dir.get(),
+            "output_dir": self.var_output_dir.get(),
+            "sheet_name": self.var_sheet_name.get(),
+            "font_scale": self.var_font_scale.get(),
+            "y_offset": self.var_y_offset.get(),
+            "spacing": self.var_spacing.get()
+        }
+        self.root.destroy()
+
+    def show(self):
+        """显示弹窗并阻塞，直到点击下一步被销毁"""
+        self.root.grab_set()
+        self.root.master.wait_window(self.root)
+        return self.config_data # 返回收集到的数据字典
