@@ -10,6 +10,7 @@ import customtkinter as ctk
 import os
 import json
 from tkinter import filedialog
+import queue
 
 # 全局基础设置
 ctk.set_appearance_mode("System")
@@ -89,11 +90,14 @@ class ModernConfirmDialog(BaseDialog):
         return self.result
 
 class ModernProgressConsole(BaseDialog):
-    """现代进度控制台"""
+    """现代进度控制台 (多线程队列安全版)"""
     def __init__(self, title, max_val):
         super().__init__(title, 420, 220)
         self.is_cancelled = False
         self.max_val = max_val
+        
+        # 【核心护城河】：跨线程信箱
+        self.msg_queue = queue.Queue()
         
         self.lbl_title = ctk.CTkLabel(self.root, text="引擎运行中...", font=("微软雅黑", 16, "bold"))
         self.lbl_title.pack(pady=(25, 5))
@@ -110,24 +114,42 @@ class ModernProgressConsole(BaseDialog):
         self.btn_stop.pack(pady=5)
         
         self.root.protocol("WM_DELETE_WINDOW", self._stop)
-        self.root.update()
+        
+        # 启动主线程的“雷达”
+        self._poll_queue()
+
+    def _poll_queue(self):
+        """主线程的雷达：每 50 毫秒去信箱看一眼有没有人递纸条"""
+        try:
+            while True:
+                msg = self.msg_queue.get_nowait()
+                if msg["type"] == "progress":
+                    progress_ratio = msg["val"] / self.max_val if self.max_val > 0 else 0
+                    self.bar.set(progress_ratio)
+                    self.lbl_status.configure(text=msg["text"])
+                elif msg["type"] == "close":
+                    if self.root.winfo_exists():
+                        self.root.destroy()
+                    return # 收到销毁指令，雷达关机
+        except queue.Empty:
+            pass
+
+        # 只要窗口还活着，就继续设个闹钟过 50 毫秒再来检查
+        if self.root.winfo_exists():
+            self.root.after(50, self._poll_queue)
 
     def update_progress(self, current_val, status_text):
-        if self.root.winfo_exists():
-            progress_ratio = current_val / self.max_val if self.max_val > 0 else 0
-            self.bar.set(progress_ratio)
-            self.lbl_status.configure(text=status_text)
-            self.root.update()
+        """【后台专供】：绝对不碰 UI，只往信箱里扔纸条"""
+        self.msg_queue.put({"type": "progress", "val": current_val, "text": status_text})
 
     def _stop(self):
         self.is_cancelled = True
         self.lbl_status.configure(text="正在中止安全环境...", text_color="#d32f2f")
         self.btn_stop.configure(state="disabled")
-        self.root.update()
 
     def close(self):
-        if self.root.winfo_exists():
-            self.root.destroy()
+        """【后台专供】：递交关窗纸条"""
+        self.msg_queue.put({"type": "close"})
 
 class ModernInfoDialog(BaseDialog):
     """现代信息反馈弹窗"""
@@ -411,3 +433,163 @@ class ModernHandwriteDialog(BaseDialog):
         self.root.grab_set()
         self.root.master.wait_window(self.root)
         return self.config_data # 返回收集到的数据字典
+
+class ModernMappingDialog(BaseDialog):
+    """现代动态数据映射网络面板"""
+    def __init__(self, json_path, title="动态阵列与数据映射配置"):
+        super().__init__(title, 700, 600)
+        self.mapping_data = None
+        self.json_path = json_path
+        
+        # 1. 解析 JSON 获取所有的框选名称
+        self.json_keys = self._parse_json_keys()
+        # 下拉菜单选项：加上“无”选项
+        self.combo_options = ["无"] + self.json_keys
+
+        # 2. 核心阵列变量绑定
+        self.var_cols = ctk.StringVar(master=self.root, value="2") # 列数
+        self.var_rows = ctk.StringVar(master=self.root, value="4") # 行数
+        self.var_excel_step = ctk.StringVar(master=self.root, value="4") # 单组数据在Excel占几行
+        
+        self.var_x_base = ctk.StringVar(master=self.root, value="构件名称" if "构件名称" in self.json_keys else "无")
+        self.var_x_target = ctk.StringVar(master=self.root, value="右" if "右" in self.json_keys else "无")
+        
+        self.var_y_base = ctk.StringVar(master=self.root, value="构件名称" if "构件名称" in self.json_keys else "无")
+        self.var_y_target = ctk.StringVar(master=self.root, value="下" if "下" in self.json_keys else "无")
+
+        # 用于存储动态生成的 Excel 坐标输入框变量
+        self.coord_vars = {}
+
+        if not self.json_keys:
+            self._show_error("JSON 解析失败或文件为空！")
+            return
+            
+        self._build_ui()
+        self._update_total_count() # 初始化计算总组数
+
+    def _parse_json_keys(self):
+        """读取 JSON 文件，提取所有顶层键名"""
+        try:
+            with open(self.json_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return list(data.keys())
+        except Exception as e:
+            print(f"读取 JSON 失败: {e}")
+            return []
+
+    def _build_ui(self):
+        # 使用 ScrollableFrame 防止 JSON 框太多导致屏幕放不下
+        main_scroll = ctk.CTkScrollableFrame(self.root, fg_color="transparent")
+        main_scroll.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # ================= 板块 A：网格阵列引擎 =================
+        frame_grid = ctk.CTkFrame(main_scroll, corner_radius=10)
+        frame_grid.pack(pady=10, padx=10, fill="x")
+        
+        ctk.CTkLabel(frame_grid, text="📐 物理排版阵列 (自动计算步长)", font=("微软雅黑", 15, "bold")).pack(pady=(15, 10))
+
+        # 阵列行列设置
+        row1 = ctk.CTkFrame(frame_grid, fg_color="transparent")
+        row1.pack(fill="x", pady=5, padx=15)
+        
+        ctk.CTkLabel(row1, text="排版列数:", font=("微软雅黑", 12)).pack(side="left", padx=(0, 5))
+        cb_cols = ctk.CTkComboBox(row1, values=["1", "2", "3", "4", "5", "6"], variable=self.var_cols, width=80, command=self._update_total_count)
+        cb_cols.pack(side="left", padx=(0, 20))
+
+        ctk.CTkLabel(row1, text="排版行数:", font=("微软雅黑", 12)).pack(side="left", padx=(0, 5))
+        cb_rows = ctk.CTkComboBox(row1, values=["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"], variable=self.var_rows, width=80, command=self._update_total_count)
+        cb_rows.pack(side="left", padx=(0, 20))
+
+        # 动态显示总组数
+        self.lbl_total = ctk.CTkLabel(row1, text="单页总计: 8 组", font=("微软雅黑", 12, "bold"), text_color="#E67E22")
+        self.lbl_total.pack(side="right", padx=10)
+
+        # 步长参照设置
+        row2 = ctk.CTkFrame(frame_grid, fg_color="transparent")
+        row2.pack(fill="x", pady=10, padx=15)
+        
+        ctk.CTkLabel(row2, text="横向(X)步长：从", font=("微软雅黑", 12)).pack(side="left")
+        ctk.CTkComboBox(row2, values=self.combo_options, variable=self.var_x_base, width=120).pack(side="left", padx=5)
+        ctk.CTkLabel(row2, text="测量至", font=("微软雅黑", 12)).pack(side="left")
+        ctk.CTkComboBox(row2, values=self.combo_options, variable=self.var_x_target, width=120).pack(side="left", padx=5)
+
+        row3 = ctk.CTkFrame(frame_grid, fg_color="transparent")
+        row3.pack(fill="x", pady=5, padx=15)
+        
+        ctk.CTkLabel(row3, text="纵向(Y)步长：从", font=("微软雅黑", 12)).pack(side="left")
+        ctk.CTkComboBox(row3, values=self.combo_options, variable=self.var_y_base, width=120).pack(side="left", padx=5)
+        ctk.CTkLabel(row3, text="测量至", font=("微软雅黑", 12)).pack(side="left")
+        ctk.CTkComboBox(row3, values=self.combo_options, variable=self.var_y_target, width=120).pack(side="left", padx=5)
+
+        # ================= 板块 B：数据源连线 =================
+        frame_data = ctk.CTkFrame(main_scroll, corner_radius=10)
+        frame_data.pack(pady=10, padx=10, fill="x")
+        
+        ctk.CTkLabel(frame_data, text="🔗 Excel 数据映射 (留空则不写入)", font=("微软雅黑", 15, "bold")).pack(pady=(15, 5))
+        
+        row_excel = ctk.CTkFrame(frame_data, fg_color="transparent")
+        row_excel.pack(fill="x", pady=(0, 15), padx=15)
+        ctk.CTkLabel(row_excel, text="单组数据在 Excel 中占用行数:", font=("微软雅黑", 12)).pack(side="left")
+        ctk.CTkEntry(row_excel, textvariable=self.var_excel_step, width=80).pack(side="left", padx=10)
+
+        # 【核心魔法】：遍历 JSON 键名，动态生成输入框
+        for key in self.json_keys:
+            row_mapping = ctk.CTkFrame(frame_data, fg_color="transparent")
+            row_mapping.pack(fill="x", pady=5, padx=30)
+            
+            ctk.CTkLabel(row_mapping, text=f"[{key}] 对应 Excel 坐标:", font=("微软雅黑", 12), width=180, anchor="e").pack(side="left", padx=(0, 10))
+            
+            var_coord = ctk.StringVar(master=self.root)
+            self.coord_vars[key] = var_coord # 存入字典备用
+            
+            # 给常见字段预设一点占位符提示，防止懵逼
+            placeholder = ""
+            if key == "构件名称": placeholder = "如: A1"
+            elif "测点" in key: placeholder = "如: C1"
+            
+            entry = ctk.CTkEntry(row_mapping, textvariable=var_coord, placeholder_text=placeholder, width=150)
+            entry.pack(side="left")
+
+        # ================= 底部按钮 =================
+        btn_confirm = ctk.CTkButton(self.root, text="🚀 启动引擎开始生成", font=("微软雅黑", 14, "bold"), 
+                                    width=200, height=45, fg_color="#E74C3C", hover_color="#C0392B", 
+                                    command=self._confirm)
+        btn_confirm.pack(pady=20)
+
+    def _update_total_count(self, *args):
+        """实时计算组数：列数 x 行数"""
+        try:
+            cols = int(self.var_cols.get())
+            rows = int(self.var_rows.get())
+            total = cols * rows
+            self.lbl_total.configure(text=f"单页总计: {total} 组")
+        except ValueError:
+            pass
+
+    def _show_error(self, msg):
+        ctk.CTkLabel(self.root, text=f"❌ {msg}", text_color="red", font=("微软雅黑", 14)).pack(pady=50)
+
+    def _confirm(self):
+        """收集所有映射数据并关闭窗口"""
+        mapping = {}
+        for key, var in self.coord_vars.items():
+            coord = var.get().strip().upper() # 自动转大写，比如 a1 变成 A1
+            if coord: # 只有填了坐标的才会被记录
+                mapping[key] = coord
+
+        self.mapping_data = {
+            "grid_cols": int(self.var_cols.get()),
+            "grid_rows": int(self.var_rows.get()),
+            "excel_step": int(self.var_excel_step.get()),
+            "x_base": self.var_x_base.get(),
+            "x_target": self.var_x_target.get(),
+            "y_base": self.var_y_base.get(),
+            "y_target": self.var_y_target.get(),
+            "coordinates": mapping
+        }
+        self.root.destroy()
+
+    def show(self):
+        self.root.grab_set()
+        self.root.master.wait_window(self.root)
+        return self.mapping_data

@@ -41,7 +41,7 @@ class MainDashboard:
             ("交叉引用格式修复", "fix_cross_ref.py"),
             ("文档转换小工具", "word2pdf.py"),
             ("PNG坐标选择器", "coord_picker.py"),
-            ("手写模拟小工具", "auto_filler.py"),
+            ("手写模拟小工具", "auto_filler_v2.py"),
         ]
 
         for text, script in modules:
