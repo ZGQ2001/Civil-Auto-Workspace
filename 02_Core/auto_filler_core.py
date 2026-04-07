@@ -133,7 +133,7 @@ def create_handwritten_sticker(text, box, fonts_dir, base_font_size, spacing, fa
     try:
         raw_img = list(handwrite(final_wrapped_text, template))[0]
         mask = ImageOps.invert(raw_img) 
-        mask = mask.filter(ImageFilter.GaussianBlur(radius=0.4)) 
+        mask = mask.filter(ImageFilter.GaussianBlur(radius=0.2)) #A：轻微模糊让墨迹更自然
         ink_layer = Image.new("RGBA", (canvas_w, canvas_h), (40, 45, 50, 235)) 
         sticker = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
         sticker.paste(ink_layer, (0, 0), mask)
