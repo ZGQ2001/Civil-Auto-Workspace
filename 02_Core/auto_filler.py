@@ -164,14 +164,14 @@ def create_handwritten_sticker(text, box, fonts_dir, font_size, fatigue_idx=0, t
         line_spacing=int(current_size * 1.15),
         fill=0, 
         left_margin=100, top_margin=top_pos, 
-        word_spacing=-2, 
+        word_spacing=-5,  # 【修改这里】：把原来的 word_spacing=-2，改成更极端的负数！
         line_spacing_sigma=1.0,               
         
         # 【全量释放随机感】
         font_size_sigma=current_size * 0.08,  # 字号大小随机波动（约8%）
-        word_spacing_sigma=1.5,               # 字距随机波动
+        word_spacing_sigma=1.0,               # 字距随机波动
         perturb_x_sigma=1.5 * fatigue_boost,  # 左右位移波动
-        perturb_y_sigma=1.0 * fatigue_boost,  # 上下位移波动
+        perturb_y_sigma=0.5 * fatigue_boost,  # 上下位移波动
         perturb_theta_sigma=0.06 * fatigue_boost # 允许文字产生倒歪倾斜
     )
     
