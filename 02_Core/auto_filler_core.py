@@ -92,43 +92,51 @@ def create_handwritten_sticker(text, box, fonts_dir, base_font_size, spacing, fa
     else:
         final_wrapped_text, lines_count, current_size = clean_text, 1, 12
 
-    # =========== 【核心修复：防崩溃 + 纯粹旧版抽签】 ===========
+    # =========== 【核心修复：防崩溃 + 纯粹旧版抽签】 ==========='
     
-    # 1. 弹药库：加载全部字体
-    multi_fonts = [ImageFont.truetype(f, current_size) for f in font_files]
+    # 1. 弹药库：加载全部字体（去重后再缓存，避免同名字体文件被重复算进概率）
+    font_files = list(dict.fromkeys(font_files))
+    multi_fonts = get_cached_fonts(font_files, current_size)
     
     # 2. 隔离傀儡：单独实例化一支笔，坚决不放入多字体列表中，彻底斩断递归死锁！
     font_ruler = ImageFont.truetype(font_files[0], current_size)
-    
-    # 3. 记忆变量
-    last_used_font = None 
 
-    # 4. 彻底还原你以前的、没有任何冗余检查的极简抽签逻辑
-    # 2. 【闪电加载】：直接从内存缓存中获取字体对象
-    multi_fonts = get_cached_fonts(font_files, current_size)
-    font_ruler = ImageFont.truetype(font_files[0], current_size)
+    # 3. 统一字体轮换器：先洗牌再逐个抽取，抽完一轮再重新洗牌
+    #    这样可以明显降低“连续很多次都撞到同一个字体”的概率。
+    font_by_path = {f.path: f for f in multi_fonts}
+    font_paths = list(font_by_path.keys())
+    last_used_font_file = None
+    font_bag = []
 
-    # 3. 【核心修正】：分别拦截 getmask 和 getmask2，确保数据格式 100% 正确
+    def pick_font():
+        nonlocal last_used_font_file, font_bag
+
+        if len(font_paths) == 1:
+            last_used_font_file = font_paths[0]
+            return font_by_path[font_paths[0]]
+
+        if not font_bag:
+            font_bag = font_paths[:]
+            random.shuffle(font_bag)
+
+            # 避免新一轮洗牌后，第一个字体又和上一笔完全一样
+            if last_used_font_file and len(font_bag) > 1 and font_bag[-1] == last_used_font_file:
+                swap_idx = random.randrange(0, len(font_bag) - 1)
+                font_bag[-1], font_bag[swap_idx] = font_bag[swap_idx], font_bag[-1]
+
+        chosen_path = font_bag.pop()
+        last_used_font_file = chosen_path
+        return font_by_path[chosen_path]
+
+    # 4. 分别挂载 getmask / getmask2，但两者共用同一套轮换逻辑
     def random_getmask(char_text, mode="", *args, **kwargs):
-        global _LAST_USED_FONT_FILE
-        # 排除掉上一笔用过的字体文件路径
-        available = [f for f in multi_fonts if f.path != _LAST_USED_FONT_FILE]
-        if not available: available = multi_fonts
-        
-        chosen = random.choice(available)
-        _LAST_USED_FONT_FILE = chosen.path 
+        chosen = pick_font()
         return chosen.getmask(char_text, mode=mode, *args, **kwargs) # 返回单个 mask
 
     def random_getmask2(char_text, mode="", *args, **kwargs):
-        global _LAST_USED_FONT_FILE
-        available = [f for f in multi_fonts if f.path != _LAST_USED_FONT_FILE]
-        if not available: available = multi_fonts
-        
-        chosen = random.choice(available)
-        _LAST_USED_FONT_FILE = chosen.path 
+        chosen = pick_font()
         return chosen.getmask2(char_text, mode=mode, *args, **kwargs) # 返回 (mask, offset)
 
-    # 分别挂载，互不干扰
     font_ruler.getmask = random_getmask
     font_ruler.getmask2 = random_getmask2
     # =========================================================
