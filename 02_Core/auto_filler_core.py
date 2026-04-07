@@ -99,13 +99,12 @@ def create_handwritten_sticker(text, box, fonts_dir, base_font_size, spacing, fa
     else:
         final_wrapped_text, lines_count, current_size = clean_text, 1, 12
 
-    # =========== 【彻底重构：抛弃无效的伪随机，采用真随机注入】 ===========
-    # 1. 弹药库：加载全部字体
+    # =========== 【返璞归真：每个格子重新摇号机制】 ===========
+    # 1. 弹药库加载（利用缓存，速度极快）
     font_files = list(dict.fromkeys(font_files))
     multi_fonts = get_cached_fonts(font_files, current_size)
     
-    # 2. 真正生效的随机：给当前的格子（这段文字），从10个字体中公平地随机抓取一个！
-    # （这里概率是严格的 1/10，且每次生成新贴纸时完全独立）
+    # 2. 核心：因为这是针对当前格子的独立运算，这一句就会让当前格子拥有随机独立字体
     chosen_font = random.choice(multi_fonts)
     # =========================================================
 
@@ -117,7 +116,7 @@ def create_handwritten_sticker(text, box, fonts_dir, base_font_size, spacing, fa
 
     template = Template(
         background=bg, 
-        font=chosen_font,  # <--- 核心修改：直接把抽出来的字体实体喂给引擎
+        font=chosen_font,  # 直接将摇号得出的实体字体对象喂给排版引擎
         line_spacing=int(current_size * 1.15),
         fill=0, 
         left_margin=100, 
