@@ -108,25 +108,35 @@ def create_handwritten_sticker(text, box, fonts_dir, base_font_size, spacing, fa
     last_used_font_file = None
     font_bag = []
 
-    def pick_font():
-        nonlocal last_used_font_file, font_bag
+    # =========== 【核心修正：自然随机避让逻辑】 ===========
+    # 1. 弹药库：加载全部字体
+    font_files = list(dict.fromkeys(font_files))
+    multi_fonts = get_cached_fonts(font_files, current_size)
+    
+    # 2. 建立路径映射
+    font_by_path = {f.path: f for f in multi_fonts}
+    font_paths = list(font_by_path.keys())
 
-        if len(font_paths) == 1:
-            last_used_font_file = font_paths[0]
+    # 3. 定义抽取逻辑：基于全局变量 _LAST_USED_FONT_FILE 避让
+    def pick_font():
+        global _LAST_USED_FONT_FILE # 必须引用全局变量，记忆才能跨格子延续
+        
+        # 如果只有一个字体，直接返回
+        if len(font_paths) <= 1:
             return font_by_path[font_paths[0]]
 
-        if not font_bag:
-            font_bag = font_paths[:]
-            random.shuffle(font_bag)
+        # 第一次随机抽取（这是你想要的 50% 基础概率）
+        chosen_path = random.choice(font_paths)
 
-            # 避免新一轮洗牌后，第一个字体又和上一笔完全一样
-            if last_used_font_file and len(font_bag) > 1 and font_bag[-1] == last_used_font_file:
-                swap_idx = random.randrange(0, len(font_bag) - 1)
-                font_bag[-1], font_bag[swap_idx] = font_bag[swap_idx], font_bag[-1]
+        # 避让逻辑：如果抽到的跟“上一格”的一样，就再重抽一次
+        # 这种“重摇一次”的做法能极大地打碎扎堆现象，且不显刻意
+        if chosen_path == _LAST_USED_FONT_FILE:
+            chosen_path = random.choice(font_paths)
 
-        chosen_path = font_bag.pop()
-        last_used_font_file = chosen_path
+        # 记录这次的选择，留给下一笔/下一格参考
+        _LAST_USED_FONT_FILE = chosen_path
         return font_by_path[chosen_path]
+    # =========================================================
 
     # 4. 分别挂载 getmask / getmask2，但两者共用同一套轮换逻辑
     def random_getmask(char_text, mode="", *args, **kwargs):
