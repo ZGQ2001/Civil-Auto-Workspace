@@ -150,7 +150,7 @@ def create_handwritten_sticker(text, box, fonts_dir, base_font_size, spacing, fa
         line_spacing_sigma=1.0,               
         font_size_sigma=current_size * 0.08,  
         word_spacing_sigma=1.0,               
-        perturb_x_sigma=1.5 * fatigue_boost,  
+        perturb_x_sigma=1.2 * fatigue_boost,  
         perturb_y_sigma=0.5 * fatigue_boost,  
         perturb_theta_sigma=0.06 * fatigue_boost 
     )
