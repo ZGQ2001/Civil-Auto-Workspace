@@ -12,7 +12,7 @@ import os           # 处理文件路径
 import json         # 读取坐标映射
 import random       # 生成手写随机抖动
 import pandas as pd  # 处理 Excel 数据
-from PIL import Image, ImageFont, ImageOps  # 图像处理核心库
+from PIL import Image, ImageFont, ImageOps, ImageFilter  # 图像处理核心库
 from handright import Template, handwrite    # 仿生手写核心引擎
 
 # ---------------- 板块 1：全局路径配置 ----------------
@@ -26,7 +26,7 @@ OUTPUT_DIR = os.path.join(BASE_DIR, "03_Output")
 JSON_PATH = os.path.join(INPUT_DIR, "record_mapping.json")
 BASE_IMG_PATH = os.path.join(INPUT_DIR, "记录表.png")
 EXCEL_PATH = os.path.join(INPUT_DIR, "平均值生成检测值.xlsm")
-FONT_PATH = os.path.join(INPUT_DIR, "font.ttf") 
+FONTS_DIR = os.path.join(INPUT_DIR, "fonts") # 指向存放多个字体的文件夹
 OUTPUT_PDF = os.path.join(OUTPUT_DIR, "自动生成_检测记录表.pdf")
 
 # 【目标 Sheet】：直接在这里改名字就行了，不要动其他代码了
@@ -60,87 +60,94 @@ def load_config():
     font_size = int(cfg["构件名称"].get("font_size", 35) * GLOBAL_SIZE_LIMIT)
     return base_boxes, dx, dy, font_size
 
-def create_handwritten_sticker(text, box, font_path, font_size, fatigue_idx=0, total_items=1):
-    """
-    仿生渲染核心：负责把文字变成一张高清、抗锯齿、带随机抖动的透明贴纸。
-    """
+# 把 font_path 参数改成了 fonts_dir
+def create_handwritten_sticker(text, box, fonts_dir, font_size, fatigue_idx=0, total_items=1):
     w, h = int(box[2]), int(box[3])
     clean_text = str(text).strip()
     
-    # 如果没数据，返回空图
     if clean_text in ['nan', 'None', '']:
         return Image.new("RGBA", (1, 1), (0, 0, 0, 0))
 
-    # 计算“写累了”的疲劳系数
+    # 动态扫描文件夹，加载所有的 .ttf 或 .otf
+    font_files = [os.path.join(fonts_dir, f) for f in os.listdir(fonts_dir) if f.endswith(('.ttf', '.otf'))]
+    if not font_files:
+        raise ValueError("报错啦：01_Input/fonts 文件夹中没有找到任何字体文件！")
+
+    # 【核心修正：单元格盲盒】
+    # 既然引擎不支持一堆字体，我们就在每次生成一个格子时，随机从池子里抽1个字体！
+    chosen_font_path = random.choice(font_files)
+
     fatigue_boost = min(1.3, 1.0 + (fatigue_idx / total_items))
-    
     current_size = font_size
     final_wrapped_text = ""
     
-    # --- 阶段 A：智能排版逻辑 (挤一挤 -> 换行 -> 缩字号) ---
+    # --- 阶段 A：智能排版逻辑 ---
     while current_size > 10:
-        font = ImageFont.truetype(font_path, current_size)
-        # 如果长度超出不多（允许 20% 溢出），强行一行写完，这最像真人
-        if font.getlength(clean_text) <= (w * 1.20):
+        # 使用抽中的那个字体对象来测算宽度
+        font_ruler = ImageFont.truetype(chosen_font_path, current_size)
+        
+        if font_ruler.getlength(clean_text) <= (w * 1.20):
             final_wrapped_text = clean_text
             lines_count = 1
             break
         
-        # 否则尝试换行
         lines = []
         cur_line = ""
         for char in clean_text:
-            if font.getlength(cur_line + char) <= (w * 1.1):
+            if font_ruler.getlength(cur_line + char) <= (w * 1.1):
                 cur_line += char
             else:
                 if cur_line: lines.append(cur_line)
                 cur_line = char
         lines.append(cur_line)
         
-        # 检查换行后的高度
         line_h = int(current_size * 1.15)
         if (len(lines) * line_h) <= (h + 10):
             final_wrapped_text = "\n".join(lines)
             lines_count = len(lines)
             break
-        current_size -= 2 # 实在塞不下才把字写小
+        current_size -= 2 
     else:
         final_wrapped_text, lines_count, current_size = clean_text, 1, 12
-        font = ImageFont.truetype(font_path, 12)
+        # 如果走到最后，别忘了也要给 font_ruler 赋值
+        font_ruler = ImageFont.truetype(chosen_font_path, 12)
 
-    # --- 阶段 B：高清抗锯齿渲染 (解决像素低、锯齿重的问题) ---
-    # 创建超大画布，防止笔画被切断
+    # --- 阶段 B：物理墨水渲染 ---
     canvas_w, canvas_h = w + 200, h + 150
-    bg = Image.new("L", (canvas_w, canvas_h), 255) # 灰度画布
-    
-    # 计算文字在格子里的垂直居中位置
+    bg = Image.new("L", (canvas_w, canvas_h), 255) 
     total_text_h = lines_count * int(current_size * 1.15)
     top_pos = (canvas_h - total_text_h) // 2
 
-    # 设置手写引擎参数
+    # 引擎参数设置
     template = Template(
-        background=bg, font=font, line_spacing=int(current_size * 1.15),
-        fill=0, # 渲染黑字
-        left_margin=100, top_margin=top_pos, # 100 是为了在超大画布中心书写
-        word_spacing=-2, # 【关键】：设置负间距，让字迹更紧凑自然
-        line_spacing_sigma=1.0, font_size_sigma=1.1, word_spacing_sigma=1.2,
-        perturb_x_sigma=1.5 * fatigue_boost, 
-        perturb_y_sigma=1.2 * fatigue_boost, 
-        perturb_theta_sigma=0.04 * fatigue_boost
+        background=bg, 
+        font=font_ruler,  # 【关键修复】：老老实实传回单个字体对象！
+        line_spacing=int(current_size * 1.15),
+        fill=0, 
+        left_margin=100, top_margin=top_pos, 
+        word_spacing=-2, 
+        line_spacing_sigma=1.0,               
+        font_size_sigma=1.03,                 
+        word_spacing_sigma=1.5,               
+        perturb_x_sigma=1.2 * fatigue_boost,  
+        perturb_y_sigma=1.4 * fatigue_boost,  
+        perturb_theta_sigma=0.02 * fatigue_boost 
     )
     
     try:
-        # 渲染原始笔触
         raw_img = list(handwrite(final_wrapped_text, template))[0]
-        
-        # 保留每一个边缘像素，彻底消除低像素锯齿感
         mask = ImageOps.invert(raw_img) 
-        ink_layer = Image.new("RGBA", (canvas_w, canvas_h), (35, 35, 35, 230)) # 深灰色墨水，稍微透明一点更自然
+        
+        # 物理滤镜
+        mask = mask.filter(ImageFilter.GaussianBlur(radius=0.4)) 
+        ink_layer = Image.new("RGBA", (canvas_w, canvas_h), (40, 45, 50, 235)) 
+        
         sticker = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
         sticker.paste(ink_layer, (0, 0), mask)
         
         return sticker
-    except:
+    except Exception as e:
+        print(f"贴纸渲染出错: {e}")
         return Image.new("RGBA", (1, 1), (0, 0, 0, 0))
 
 # ---------------- 板块 3：主程序自动化流程 ----------------
@@ -200,8 +207,8 @@ def main():
             bx, by, bw, bh = base_boxes[key]
             tx, ty = int(bx + cur_dx), int(by + cur_dy)
             
-            # 生成完美的贴纸
-            sticker = create_handwritten_sticker(item[key], [tx, ty, bw, bh], FONT_PATH, final_font_size, idx, total_count)
+            # 把原先单字体的 FONT_PATH 替换为字体文件夹 FONTS_DIR
+            sticker = create_handwritten_sticker(item[key], [tx, ty, bw, bh], FONTS_DIR, final_font_size, idx, total_count)
             
             # 【重要修正】：粘贴坐标偏移对齐
             # 因为贴纸画布左右多加了 100 像素，上下多加了 75 像素（中心点对齐）
