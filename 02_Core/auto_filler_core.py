@@ -15,17 +15,24 @@ import pandas as pd
 from PIL import Image, ImageFont, ImageOps, ImageFilter
 from handright import Template, handwrite
 
-# ==================== 【黑科技：全局高速缓存】 ====================
+# ==================== 【全局高速缓存：修复版】 ====================
 # 用于存放已经加载好的字体，避免重复扫描硬盘，大幅提升初始化速度
 _FONT_POOL_CACHE = {}
-_LAST_USED_FONT_FILE = None # 记录全局上一笔用的字体文件路径，实现跨格不撞衫
 
 def get_cached_fonts(font_files, size):
-    """内存池：相同字号的字体只会在第一次使用时加载"""
-    if size not in _FONT_POOL_CACHE:
-        # 一次性装填所有弹药，后续直接调用
-        _FONT_POOL_CACHE[size] = [ImageFont.truetype(f, size) for f in font_files]
-    return _FONT_POOL_CACHE[size]
+    """
+    内存池：将字体文件列表和字号共同作为钥匙。
+    为什么这么做：只要文件夹里的字体数量或名字变了，钥匙就会改变，程序会自动重新加载，不会再被旧缓存坑了。
+    """
+    # 将列表转换为不可变的元组，加上字号，共同作为字典的键
+    cache_key = (tuple(font_files), size)
+    
+    if cache_key not in _FONT_POOL_CACHE:
+        # 如果是新字体组合或新字号，重新装填弹药
+        _FONT_POOL_CACHE[cache_key] = [ImageFont.truetype(f, size) for f in font_files]
+        
+    return _FONT_POOL_CACHE[cache_key]
+# =================================================================
 # =================================================================
 # ==================== 工具函数：智能坐标翻译 ====================
 def parse_excel_coord(coord_str):
@@ -92,63 +99,14 @@ def create_handwritten_sticker(text, box, fonts_dir, base_font_size, spacing, fa
     else:
         final_wrapped_text, lines_count, current_size = clean_text, 1, 12
 
-    # =========== 【核心修复：防崩溃 + 纯粹旧版抽签】 ==========='
-    
-    # 1. 弹药库：加载全部字体（去重后再缓存，避免同名字体文件被重复算进概率）
-    font_files = list(dict.fromkeys(font_files))
-    multi_fonts = get_cached_fonts(font_files, current_size)
-    
-    # 2. 隔离傀儡：单独实例化一支笔，坚决不放入多字体列表中，彻底斩断递归死锁！
-    font_ruler = ImageFont.truetype(font_files[0], current_size)
-
-    # 3. 统一字体轮换器：先洗牌再逐个抽取，抽完一轮再重新洗牌
-    #    这样可以明显降低“连续很多次都撞到同一个字体”的概率。
-    font_by_path = {f.path: f for f in multi_fonts}
-    font_paths = list(font_by_path.keys())
-    last_used_font_file = None
-    font_bag = []
-
-    # =========== 【核心修正：自然随机避让逻辑】 ===========
+    # =========== 【彻底重构：抛弃无效的伪随机，采用真随机注入】 ===========
     # 1. 弹药库：加载全部字体
     font_files = list(dict.fromkeys(font_files))
     multi_fonts = get_cached_fonts(font_files, current_size)
     
-    # 2. 建立路径映射
-    font_by_path = {f.path: f for f in multi_fonts}
-    font_paths = list(font_by_path.keys())
-
-    # 3. 定义抽取逻辑：基于全局变量 _LAST_USED_FONT_FILE 避让
-    def pick_font():
-        global _LAST_USED_FONT_FILE # 必须引用全局变量，记忆才能跨格子延续
-        
-        # 如果只有一个字体，直接返回
-        if len(font_paths) <= 1:
-            return font_by_path[font_paths[0]]
-
-        # 第一次随机抽取（这是你想要的 50% 基础概率）
-        chosen_path = random.choice(font_paths)
-
-        # 避让逻辑：如果抽到的跟“上一格”的一样，就再重抽一次
-        # 这种“重摇一次”的做法能极大地打碎扎堆现象，且不显刻意
-        if chosen_path == _LAST_USED_FONT_FILE:
-            chosen_path = random.choice(font_paths)
-
-        # 记录这次的选择，留给下一笔/下一格参考
-        _LAST_USED_FONT_FILE = chosen_path
-        return font_by_path[chosen_path]
-    # =========================================================
-
-    # 4. 分别挂载 getmask / getmask2，但两者共用同一套轮换逻辑
-    def random_getmask(char_text, mode="", *args, **kwargs):
-        chosen = pick_font()
-        return chosen.getmask(char_text, mode=mode, *args, **kwargs) # 返回单个 mask
-
-    def random_getmask2(char_text, mode="", *args, **kwargs):
-        chosen = pick_font()
-        return chosen.getmask2(char_text, mode=mode, *args, **kwargs) # 返回 (mask, offset)
-
-    font_ruler.getmask = random_getmask
-    font_ruler.getmask2 = random_getmask2
+    # 2. 真正生效的随机：给当前的格子（这段文字），从10个字体中公平地随机抓取一个！
+    # （这里概率是严格的 1/10，且每次生成新贴纸时完全独立）
+    chosen_font = random.choice(multi_fonts)
     # =========================================================
 
     # === 恢复旧版的动态居中锚点计算 ===
@@ -159,11 +117,11 @@ def create_handwritten_sticker(text, box, fonts_dir, base_font_size, spacing, fa
 
     template = Template(
         background=bg, 
-        font=font_ruler, 
+        font=chosen_font,  # <--- 核心修改：直接把抽出来的字体实体喂给引擎
         line_spacing=int(current_size * 1.15),
         fill=0, 
         left_margin=100, 
-        top_margin=top_pos, # 使用动态上下居中
+        top_margin=top_pos,
         word_spacing=spacing, 
         line_spacing_sigma=1.0,               
         font_size_sigma=current_size * 0.08,  
