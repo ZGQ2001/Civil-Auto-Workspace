@@ -11,6 +11,7 @@ import os
 import json
 from tkinter import filedialog
 import queue
+from typing import List, Dict, Any
 
 # 全局基础设置
 ctk.set_appearance_mode("System")
@@ -593,3 +594,125 @@ class ModernMappingDialog(BaseDialog):
         self.root.grab_set()
         self.root.master.wait_window(self.root)
         return self.mapping_data
+    
+class ModernDynamicFormDialog(BaseDialog):
+    """
+    通用动态表单生成器 (极度解耦版)
+    功能：通过传入配置列表，自动生成各类输入控件，彻底消灭为不同业务写死 UI 的情况。
+    """
+    def __init__(self, title: str, form_schema: List[Dict[str, Any]], width: int = 550):
+        # 根据表单字段数量动态计算高度，每个字段约占 45px 高度，加上下边距和按钮空间
+        calc_height = len(form_schema) * 45 + 150
+        super().__init__(title, width, calc_height)
+        
+        self.form_schema = form_schema
+        # 核心数据字典：用于存储所有控件绑定的 Variable 对象，键为字段的 key
+        self.result_vars = {}
+        # 最终点击确定后返回的数据集
+        self.final_data = None 
+        
+        # 整体采用可滚动的容器，防止字段过多超出屏幕范围
+        self.scroll_frame = ctk.CTkScrollableFrame(self.root, fg_color="transparent")
+        self.scroll_frame.pack(fill="both", expand=True, padx=20, pady=(15, 5))
+        
+        # 动态渲染 UI 引擎
+        self._build_dynamic_form()
+        
+        # 底部操作区
+        self.btn_confirm = ctk.CTkButton(
+            self.root, text="确定", command=self._confirm, 
+            font=("微软雅黑", 14, "bold"), width=180, height=45
+        )
+        self.btn_confirm.pack(pady=(10, 20))
+
+    def _build_dynamic_form(self):
+        """遍历 Schema，按类型渲染对应的控件"""
+        for item in self.form_schema:
+            field_key = item.get("key")        # 提取数据的字典键，必填
+            field_label = item.get("label")    # 左侧显示的文字，必填
+            field_type = item.get("type", "text") # 控件类型，默认为单行文本
+            default_val = item.get("default", "") # 默认值
+            
+            # 创建单行容器
+            row_frame = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
+            row_frame.pack(fill="x", pady=8)
+            
+            # 统一左侧 Label 宽度，保证对齐整洁
+            ctk.CTkLabel(row_frame, text=field_label, font=("微软雅黑", 12), width=120, anchor="e").pack(side="left", padx=(0, 15))
+            
+            # 【路由分发】：根据不同的 type 生成不同的控件
+            if field_type == "text":
+                var = ctk.StringVar(master=self.root, value=str(default_val))
+                entry = ctk.CTkEntry(row_frame, textvariable=var, width=250)
+                entry.pack(side="left")
+                self.result_vars[field_key] = var
+                
+            elif field_type == "number":
+                # 数字输入框，限制只能输入数字（这里用普通文本框+后续取值转换）
+                var = ctk.StringVar(master=self.root, value=str(default_val))
+                entry = ctk.CTkEntry(row_frame, textvariable=var, width=120)
+                entry.pack(side="left")
+                ctk.CTkLabel(row_frame, text=item.get("unit", ""), font=("微软雅黑", 12)).pack(side="left", padx=(5, 0))
+                self.result_vars[field_key] = var
+                
+            elif field_type == "radio":
+                var = ctk.StringVar(master=self.root, value=str(default_val))
+                options = item.get("options", [])
+                for opt in options:
+                    ctk.CTkRadioButton(row_frame, text=opt, variable=var, value=opt).pack(side="left", padx=(0, 15))
+                self.result_vars[field_key] = var
+
+            elif field_type == "select":
+                # 下拉选择框，需要传入 options 列表
+                options = [str(o) for o in item.get("options", [])]
+                init_val = str(default_val) if str(default_val) in options else (options[0] if options else "")
+                var = ctk.StringVar(master=self.root, value=init_val)
+                combo = ctk.CTkComboBox(row_frame, values=options, variable=var, width=250, state="readonly")
+                combo.pack(side="left")
+                self.result_vars[field_key] = var
+
+            elif field_type == "file" or field_type == "dir":
+                # 文件或目录选择器组合
+                var = ctk.StringVar(master=self.root, value=str(default_val))
+                entry = ctk.CTkEntry(row_frame, textvariable=var, state="readonly")
+                entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
+                
+                # 绑定对应的点击事件
+                if field_type == "file":
+                    file_types = item.get("file_types", [("所有文件", "*.*")])
+                    btn = ctk.CTkButton(row_frame, text="浏览", width=60, 
+                                        command=lambda v=var, ft=file_types: self._browse_file(v, ft))
+                else:
+                    btn = ctk.CTkButton(row_frame, text="选择目录", width=60, 
+                                        command=lambda v=var: self._browse_dir(v))
+                btn.pack(side="right")
+                self.result_vars[field_key] = var
+
+    def _browse_file(self, var: ctk.StringVar, file_types: List):
+        """文件选择路由（解除置顶防止文件框被挡住）"""
+        self.root.attributes('-topmost', False)
+        path = filedialog.askopenfilename(filetypes=file_types)
+        self.root.attributes('-topmost', True)
+        if path:
+            var.set(path)
+
+    def _browse_dir(self, var: ctk.StringVar):
+        """目录选择路由"""
+        self.root.attributes('-topmost', False)
+        path = filedialog.askdirectory()
+        self.root.attributes('-topmost', True)
+        if path:
+            var.set(path)
+
+    def _confirm(self):
+        """收集所有绑定变量的数据并打包成标准字典"""
+        self.final_data = {}
+        for key, var in self.result_vars.items():
+            self.final_data[key] = var.get()
+        self.root.destroy()
+
+    def show(self) -> dict:
+        """阻塞式调用，返回清洗后的数据字典"""
+        self.root.grab_set()
+        self.root.master.wait_window(self.root)
+        return self.final_data    
