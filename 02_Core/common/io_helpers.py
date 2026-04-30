@@ -38,7 +38,8 @@ def read_sheet_names(excel_path: str) -> List[str]:
     # 延迟导入：避免在不需要 pandas 的工具里也强制加载它
     import pandas as pd
     try:
-        return pd.ExcelFile(excel_path).sheet_names
+        sheet_names = pd.ExcelFile(excel_path).sheet_names
+        return [str(name) for name in sheet_names]
     except Exception as e:
         print(f"❌ 读取 Sheet 列表失败: {e}")
         return []
