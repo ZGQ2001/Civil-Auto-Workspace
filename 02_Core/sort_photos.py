@@ -1,9 +1,56 @@
+from typing import Optional
 import os
 import re
+import sys
 import copy
+import subprocess
 import pandas as pd
 from tkinter import filedialog
 from docx import Document
+import win32com.client
+import pythoncom
+
+
+def kill_winword_processes(reason: str = ""):
+    """强制结束所有 WINWORD.EXE 进程，避免 COM 附着到挂着隐藏弹窗的僵尸 Word。"""
+    tag = f"（{reason}）" if reason else ""
+    print(f"🧹 正在清理残留 WINWORD.EXE 进程{tag}...")
+    try:
+        result = subprocess.run(
+            ["taskkill", "/F", "/IM", "WINWORD.EXE", "/T"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            print("   ↳ 已结束残留 Word 进程")
+        else:
+            # returncode 128 / 1 通常代表"没有匹配进程"，正常
+            print("   ↳ 没有发现需要清理的 Word 进程")
+    except Exception as e:
+        print(f"   ⚠️ taskkill 调用失败（忽略，继续）: {e}")
+
+
+def unblock_file(file_path: str):
+    """移除 Windows 的"来自互联网"标记 (Zone.Identifier ADS)，避免 Word 触发受保护视图。"""
+    abs_path = os.path.abspath(file_path)
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", f"Unblock-File -LiteralPath \"{abs_path}\""],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            print(f"🔓 已解除文件网络标记: {os.path.basename(abs_path)}")
+        else:
+            print(f"   ⚠️ Unblock-File 返回非 0（通常无标记，可忽略）: {result.stderr.strip()}")
+    except Exception as e:
+        print(f"   ⚠️ Unblock-File 调用失败（忽略，继续）: {e}")
+
+# 让 print 实时刷新，避免在 IDE / 重定向场景下日志被块缓冲攒到最后才一次性输出
+_reconfigure = getattr(sys.stdout, "reconfigure", None)
+if callable(_reconfigure):
+    try:
+        _reconfigure(line_buffering=True)
+    except Exception:
+        pass
 
 # 【架构解耦】：直接从你的通用 UI 库中引入动态表单组件
 from ui_components import ModernDynamicFormDialog
@@ -12,14 +59,19 @@ from ui_components import ModernDynamicFormDialog
 # 模块 1：配置中心
 # ==========================================
 class Config:
-    EXCEL_PATH = '缺陷清单.xlsx'
-    EXCEL_SHEET = None              # None = 第一个 sheet
-    EXCEL_COL_NAME = '照片'
-    WORD_PATH = '待排序_附录1.docx'
-    OUTPUT_DIR = ''                 # 空 = 与 Word 同目录
-    OUTPUT_NAME = '已排序_附录1.docx'
-    OUTPUT_PATH = '已排序_附录1.docx'   # 由 OUTPUT_DIR + OUTPUT_NAME 拼出
-    MATCH_PATTERN = r'图\s*(\d+)'
+    EXCEL_PATH: str = '缺陷清单.xlsx'
+    EXCEL_SHEET: Optional[str] = None  # None = 第一个 sheet
+    EXCEL_COL_NAME: str = '照片'
+    WORD_PATH: str = '待排序_附录1.docx'
+    OUTPUT_DIR: str = ''  # 空 = 与 Word 同目录
+    OUTPUT_NAME: str = '已排序_附录1.docx'
+    OUTPUT_PATH: str = '已排序_附录1.docx'  # 由 OUTPUT_DIR + OUTPUT_NAME 拼出
+    MATCH_PATTERN: str = r'图\s*(\d+)'
+
+    @classmethod
+    def update(cls, **kwargs):
+        for k, v in kwargs.items():
+            setattr(cls, k, v)
 
 # ==========================================
 # 模块 2：解析器（提取排序规则）
@@ -46,27 +98,36 @@ def get_excel_sort_order(path, col_name, sheet_name=None):
 # ==========================================
 class WordTableProcessor:
     def __init__(self, doc_path):
-        self.doc = Document(doc_path)
+        self.doc_path = doc_path
         self.pairs = {}
         self.unmatched = []
 
     def extract_pairs(self, excel_order):
-        if not self.doc.tables:
+        """使用 python-docx 提取配对信息（仅文本，用于匹配）"""
+        print("🔍 正在用 python-docx 解析 Word 文档...")
+        doc = Document(self.doc_path)
+
+        if not doc.tables:
             raise ValueError("❌ Word 文档中没有找到任何表格！")
 
-        table = self.doc.tables[0]
+        table = doc.tables[0]
+        total_rows = len(table.rows)
+        print(f"📑 检测到表格共 {total_rows} 行，开始扫描配对（含合并单元格时此步可能较慢）...")
 
-        for i in range(0, len(table.rows), 2):
-            if i + 1 >= len(table.rows):
+        excel_order_set = set(excel_order)  # 加速 in 判断
+
+        for i in range(0, total_rows, 2):
+            if i + 1 >= total_rows:
                 break
+
+            if i % 20 == 0:
+                print(f"   ↳ 解析进度: {i}/{total_rows}")
 
             img_row = table.rows[i]
             txt_row = table.rows[i+1]
 
             for j in range(len(img_row.cells)):
-                img_cell = img_row.cells[j]
                 txt_cell = txt_row.cells[j]
-
                 text = txt_cell.text.strip()
                 if not text:
                     continue
@@ -74,37 +135,146 @@ class WordTableProcessor:
                 match = re.search(Config.MATCH_PATTERN, text)
                 if match:
                     num = int(match.group(1))
-                    pair_data = [copy.deepcopy(img_cell._tc), copy.deepcopy(txt_cell._tc)]
+                    # 记录行索引，用于后续 COM 处理
+                    pair_data = {"num": num, "img_row_idx": i, "txt_row_idx": i+1, "img_col_idx": j, "txt_col_idx": j}
 
-                    if num in excel_order:
+                    if num in excel_order_set:
                         self.pairs[num] = pair_data
                     else:
                         self.unmatched.append(pair_data)
 
+        print(f"✅ 解析完成：匹配 {len(self.pairs)} 个，未匹配 {len(self.unmatched)} 个")
+
     def rebuild(self, excel_order):
-        new_doc = Document()
-        new_table = new_doc.add_table(rows=0, cols=2)
-        new_table.style = 'Table Grid'
+        """使用 COM 接口正确复制包含图片的单元格"""
+        # 启动前先把所有 WINWORD.EXE 干掉，确保我们启动的是一个干净进程
+        kill_winword_processes(reason="启动 Word COM 前预清理")
 
-        final_list = []
-        for num in excel_order:
-            if num in self.pairs:
-                final_list.append(self.pairs[num])
-        final_list.extend(self.unmatched)
+        # 初始化 COM
+        pythoncom.CoInitialize()
+        word_app = None
 
-        for k in range(0, len(final_list), 2):
-            r1 = new_table.add_row().cells
-            r2 = new_table.add_row().cells
+        try:
+            # 先解除"来自互联网"标记，避免触发受保护视图导致 Open 卡住
+            unblock_file(self.doc_path)
 
-            r1[0]._element.getparent().replace(r1[0]._element, final_list[k][0])
-            r2[0]._element.getparent().replace(r2[0]._element, final_list[k][1])
+            print("📋 正在启动 Word 应用（DispatchEx 强制新进程；窗口设为可见，方便看到任何弹框）...")
+            word_app = win32com.client.DispatchEx("Word.Application")
+            word_app.Visible = True  # ← 暂时设为 True 用于调试；问题定位后可改回 False
+            word_app.DisplayAlerts = 0
+            # 关闭可能导致隐藏弹窗的功能
+            try:
+                word_app.AutomationSecurity = 3  # msoAutomationSecurityForceDisable
+            except Exception:
+                pass
 
-            if k + 1 < len(final_list):
-                r1[1]._element.getparent().replace(r1[1]._element, final_list[k+1][0])
-                r2[1]._element.getparent().replace(r2[1]._element, final_list[k+1][1])
+            # 打开源文档（显式传所有可能弹框的开关，强制静默打开）
+            print("📂 正在打开源文档...")
+            src_path_abs = os.path.abspath(self.doc_path)
+            src_doc = word_app.Documents.Open(
+                FileName=src_path_abs,
+                ConfirmConversions=False,   # 不弹"格式转换"对话框
+                ReadOnly=False,
+                AddToRecentFiles=False,
+                Revert=False,               # 已打开则不重新加载
+                Format=0,                   # wdOpenFormatAuto
+                Visible=True,
+                OpenAndRepair=False,        # 不触发"打开并修复"流程，那个会卡很久
+                NoEncodingDialog=True,
+            )
+            print("✅ 源文档已打开")
+            
+            # 创建新文档
+            print("📄 正在创建新文档...")
+            new_doc = word_app.Documents.Add()
+            
+            if new_doc.Tables.Count > 0:
+                new_doc.Tables(1).Delete()
+            
+            # 获取源表格
+            src_table = src_doc.Tables(1)
+            src_rows = src_table.Rows.Count
+            src_cols = src_table.Columns.Count
+            print(f"📊 源表格共有 {src_rows} 行 × {src_cols} 列")
 
-        new_doc.save(Config.OUTPUT_PATH)
-        print(f"✅ 处理完成！已生成新文件: {Config.OUTPUT_PATH}")
+            # 构建最终顺序列表
+            final_list = []
+            for num in excel_order:
+                if num in self.pairs:
+                    final_list.append(self.pairs[num])
+            final_list.extend(self.unmatched)
+            print(f"📋 共有 {len(final_list)} 个配对待处理")
+
+            # 还原源表的版式：每"组"占 2 行（图片行 + 说明行）× src_cols 列
+            # 即每行能容纳 src_cols 张图，前后两行成对（上图下注）
+            pairs_per_group = src_cols
+            num_groups = (len(final_list) + pairs_per_group - 1) // pairs_per_group
+            total_new_rows = num_groups * 2
+
+            print(f"🔨 正在创建新表格 ({total_new_rows} 行 × {src_cols} 列，{pairs_per_group} 张图/组)...")
+            new_table = new_doc.Tables.Add(
+                Range=new_doc.Range(0, 0),
+                NumRows=total_new_rows,
+                NumColumns=src_cols,
+                DefaultTableBehavior=1  # wdWord9TableBehavior
+            )
+            new_table.Borders.Enable = True
+            print("✅ 新表格创建完成")
+
+            # 逐个复制单元格：第 idx 个配对 → group=idx//cols，col=idx%cols+1，图行=group*2+1，注行=group*2+2
+            for idx, item in enumerate(final_list):
+                if idx % 10 == 0:
+                    print(f"🔄 进度: {idx+1}/{len(final_list)}")
+
+                group_idx = idx // pairs_per_group
+                col_in_new = (idx % pairs_per_group) + 1
+                img_row_in_new = group_idx * 2 + 1
+                txt_row_in_new = group_idx * 2 + 2
+
+                # 复制图片单元格 → 新表的"图行"
+                src_img_cell = src_table.Cell(Row=item["img_row_idx"] + 1, Column=item["img_col_idx"] + 1)
+                target_img_cell = new_table.Cell(Row=img_row_in_new, Column=col_in_new)
+                try:
+                    src_img_cell.Range.Copy()
+                    target_img_cell.Range.Paste()
+                except Exception as e:
+                    print(f"⚠️ 复制图片单元格 ({idx}) 失败: {e}")
+                    target_img_cell.Range.Text = "[图片]"
+
+                # 复制文字单元格 → 新表的"注行"
+                src_txt_cell = src_table.Cell(Row=item["txt_row_idx"] + 1, Column=item["txt_col_idx"] + 1)
+                target_txt_cell = new_table.Cell(Row=txt_row_in_new, Column=col_in_new)
+                try:
+                    src_txt_cell.Range.Copy()
+                    target_txt_cell.Range.Paste()
+                except Exception as e:
+                    print(f"⚠️ 复制文字单元格 ({idx}) 失败: {e}")
+                    target_txt_cell.Range.Text = src_txt_cell.Range.Text
+
+            # 末尾若不满一组（例如 src_cols=2 但配对数为奇数），剩余单元格留空即可，无需特殊处理
+            
+            # 保存新文档
+            print("💾 正在保存新文档...")
+            new_doc.SaveAs(os.path.abspath(Config.OUTPUT_PATH))
+            print("✅ 文档已保存")
+            
+            new_doc.Close()
+            src_doc.Close()
+            
+            print(f"✅ 处理完成！已生成新文件: {Config.OUTPUT_PATH}")
+            
+        except Exception as e:
+            print(f"❌ COM 重构失败: {e}")
+            raise
+        finally:
+            if word_app:
+                try:
+                    word_app.Quit()
+                except Exception:
+                    pass
+            pythoncom.CoUninitialize()
+            # 兜底清理：即使 Quit 没释放干净，也确保不会有僵尸进程留下来卡住下次运行
+            kill_winword_processes(reason="退出兜底")
 
 # ==========================================
 # 模块 4：执行入口（纯粹的业务调用）
@@ -162,18 +332,19 @@ if __name__ == "__main__":
     if not params or not params.get("word_path"):
         print("⚠️ 已取消：未选择 Word 文件或直接关闭了窗口。")
     else:
-        Config.EXCEL_PATH = excel_path
-        Config.EXCEL_SHEET = params.get("sheet_name") or sheets[0]
-        Config.EXCEL_COL_NAME = params.get("excel_col") or Config.EXCEL_COL_NAME
-        Config.WORD_PATH = params["word_path"]
-        Config.OUTPUT_DIR = params.get("output_dir") or os.path.dirname(Config.WORD_PATH)
-        Config.OUTPUT_NAME = params.get("output_name") or Config.OUTPUT_NAME
+        Config.update(
+            EXCEL_PATH=excel_path,
+            EXCEL_SHEET=params.get("sheet_name") or sheets[0],
+            EXCEL_COL_NAME=params.get("excel_col") or Config.EXCEL_COL_NAME,
+            WORD_PATH=params["word_path"],
+            OUTPUT_DIR=params.get("output_dir") or os.path.dirname(Config.WORD_PATH),
+            OUTPUT_NAME=params.get("output_name") or Config.OUTPUT_NAME
+        )
 
         # 文件名安全兜底：如果用户没写后缀，自动补 .docx
         if not Config.OUTPUT_NAME.lower().endswith(".docx"):
             Config.OUTPUT_NAME += ".docx"
 
-        os.makedirs(Config.OUTPUT_DIR, exist_ok=True)
         Config.OUTPUT_PATH = os.path.join(Config.OUTPUT_DIR, Config.OUTPUT_NAME)
 
         print(f"🚀 正在读取数据... [Sheet: {Config.EXCEL_SHEET}]")
@@ -184,5 +355,7 @@ if __name__ == "__main__":
         else:
             print(f"📊 从 Excel 获取到 {len(order)} 个排序指令，开始重构 Word...")
             processor = WordTableProcessor(Config.WORD_PATH)
+            print("—— 阶段 A：解析 Word 表格 ——")
             processor.extract_pairs(order)
+            print("—— 阶段 B：通过 Word COM 重构文档 ——")
             processor.rebuild(order)

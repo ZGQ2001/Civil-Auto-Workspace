@@ -25,3 +25,17 @@ dependencies = [
     "typing-extensions==4.15.0",
     "tzdata==2026.1",
 ]
+[tool.pyright]
+# 必须显式写出 Pylance 期待的几个名字，它才会停止报 missingDefaultExcludes
+exclude = [
+    "**/node_modules",
+    "**/__pycache__",
+    "**/.venv",        # 必须显式加上这一行
+    "**/.*",           # 涵盖其他隐藏文件夹
+    "temp",            # 结尾记得加逗号
+    "out"              # 结尾记得加逗号
+]
+
+executionEnvironments = [
+  { root = "." }
+]

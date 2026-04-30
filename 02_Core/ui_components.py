@@ -609,7 +609,7 @@ class ModernDynamicFormDialog(BaseDialog):
         # 核心数据字典：用于存储所有控件绑定的 Variable 对象，键为字段的 key
         self.result_vars = {}
         # 最终点击确定后返回的数据集
-        self.final_data = None 
+        self.final_data: Dict[str, Any] = {}
         
         # 整体采用可滚动的容器，防止字段过多超出屏幕范围
         self.scroll_frame = ctk.CTkScrollableFrame(self.root, fg_color="transparent")
@@ -629,7 +629,7 @@ class ModernDynamicFormDialog(BaseDialog):
         """遍历 Schema，按类型渲染对应的控件"""
         for item in self.form_schema:
             field_key = item.get("key")        # 提取数据的字典键，必填
-            field_label = item.get("label")    # 左侧显示的文字，必填
+            field_label = str(item.get("label", "") or "")    # 左侧显示的文字，必填
             field_type = item.get("type", "text") # 控件类型，默认为单行文本
             default_val = item.get("default", "") # 默认值
             
