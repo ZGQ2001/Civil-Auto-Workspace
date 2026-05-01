@@ -1,67 +1,145 @@
 # 🏗️ Civil Auto Workspace (CAW)
-> **工程报告自动化排版矩阵**  
-> *Transforming Engineering Reports from Manual Labor to Digital Precision.*
+
+> **工程报告自动化工具箱**  
+> *让工程师回归专业分析，而非陷于机械劳动。*
 
 ---
 
-## 🌟 项目愿景 | Project Vision
-在传统的工程检测与鉴定工作中，报告排版往往占据了工程师大量的时间成本。**Civil Auto Workspace (CAW)** 旨在通过一套高度模块化的自动化体系，将机械化的排版工作转化为秒级的数字化生成，让工程师回归专业分析，而非陷于格式泥潭。
+## 🌟 项目愿景
 
-### 核心哲学：解耦与适配
-CAW 采用了**「配置-执行」解耦架构**。通过将排版标准（字体、字号、间距等）完全定义在 `JSON` 配置文件中，实现了逻辑代码与业务标准的彻底分离。这意味着：**无需修改一行代码，即可通过调整配置适配任何一套新的报告标准。**
+在传统的工程检测与鉴定工作中，工程师日常需要处理大量零散但重复的任务：格式调整、表格整理、照片排序、批量出图、文档转换……
 
----
+**Civil Auto Workspace (CAW)** 正是为这些场景设计的一个**工具箱**——每个工具独立运行，通过统一的图形界面调度。
 
-## 🛠️ 技术栈 | Tech Stack
-- **Language:** Python 3.11+
-- **Core Libraries:** 
-  - `pywin32` (COM Interface for Word/WPS)
-  - `pypdf` & `PyMuPDF (fitz)` (High-precision PDF processing)
-  - `Pillow` (Visual coordinate mapping)
-  - `tkinter` (Lightweight GUI Control Panel)
+### 核心哲学：配置-执行解耦
+
+CAW 采用了**「配置-执行」解耦架构**。通过将样式标准（字体、字号、间距等）完全定义在 `JSON` 配置文件中，实现了逻辑代码与业务标准的彻底分离。这意味着：**无需修改代码，通过调整配置即可适配不同的报告标准。**
 
 ---
 
-## 📂 模块矩阵 | Module Matrix
+## 🛠️ 技术栈
 
-### 1. 统一调度中心 (`main.py`)
-项目唯一的入口。采用异步唤醒机制，通过图形化面板一键调度所有子模块，实现任务的流水线操作。
-
-### 2. 智能排版引擎 (`02_Core`)
-- **正文引擎 (`body_format.py`)**: 基于语义层级的智能识别，自动处理多级标题、图表标注及缩进，确保文档结构绝对一致。
-- **表格引擎 (`table_format.py`)**: 针对工程表格的专项优化。实现全量宽度规整、单元格对齐，并集成**空值自动标红**的质量校验功能。
-
-### 3. 专项纠偏套件 (`02_Core`)
-- **规范校对 (`bracket_format.py`)**: 针对工程文档中极易出错的括号全半角进行全局纠偏，同时智能保护技术参数，确保规范代号不被误改。
-- **引用修复 (`fix_cross_ref.py`)**: 解决 Word 交叉引用在更新后易崩坏的痛点，通过强制追加 `\\* MERGEFORMAT` 确保格式稳定性。
-
-### 4. PDF 处理链路 (`02_Core`)
-- **高效转换 (`word2pdf.py`)**: 集成多线程批量转换与合并逻辑，自带引擎重启机制，确保在处理大规模文档时的鲁棒性。
-- **坐标拾取 (`pdf_coordinate_picker.py`)**: 可视化精准定位，为自动化填充提供高精度的坐标映射基准。
+| 类别 | 技术 |
+|------|------|
+| **语言** | Python 3.11+ |
+| **Office 自动化** | `pywin32` (COM Interface for Word/WPS) |
+| **PDF 处理** | `pypdf` / `PyMuPDF (fitz)` |
+| **图像处理** | `Pillow` / `Matplotlib` |
+| **GUI 框架** | `customtkinter` / `tkinter` |
 
 ---
 
-## 🚀 快速部署 | Deployment
+## 🧰 工具箱
 
-### 环境准备
-建议使用 `uv` 或 `venv` 构建隔离环境：
-```bash
-# 快速安装依赖
-pip install -r requirements.txt
+### 📝 报告排版工具
+
+| 工具 | 功能 |
+|------|------|
+| **正文排版引擎** | 基于语义层级自动识别，套用 JSON 配置的字体、间距、缩进、大纲级别 |
+| **表格排版引擎** | 统一表格字号、行高、表名样式，**空单元格自动标红**质量校验 |
+| **括号半全角纠偏** | 通过 Word 通配符引擎全局规范：技术参数转半角、国标代号锁全角 |
+| **交叉引用修复** | 为所有 REF 域追加 `\* MERGEFORMAT`，避免格式丢失 |
+
+### 📷 照片附录工具
+
+| 工具 | 功能 |
+|------|------|
+| **照片流水线** | 一键完成：按 Excel 缺陷清单顺序重排 Word 表格图片 → 题注重编号 → 同步改 Excel 引用 |
+| **照片排序** | 按 Excel 顺序重排 Word 文档中的图片 |
+| **照片重编号** | 按顺序重编号图片题注 |
+
+### 📊 数据绘图工具
+
+| 工具 | 功能 |
+|------|------|
+| **批量绘图** | 从 Excel 读取数据，套用模板批量出 PNG 曲线图 |
+
+### 📄 文档转换工具
+
+| 工具 | 功能 |
+|------|------|
+| **Word → PDF** | Word 文档批量转换为 PDF |
+| **PDF → Word** | PDF 转回 Word 文档 |
+| **PDF 合并** | 多个 PDF 合并为一个 |
+
+### 🎨 图形处理工具
+
+| 工具 | 功能 |
+|------|------|
+| **PNG 坐标拾取器** | 在图片上框选区域，输出像素坐标 JSON |
+| **手写模拟生成器** | 读 Excel + PNG 底图 + 坐标 → 仿生手写体填表，导出 PDF |
+
+### ⚙️ 配置编辑器
+
+| 工具 | 功能 |
+|------|------|
+| **报告样式配置** | 可视化编辑 `report_style_config.json` |
+| **曲线模板配置** | 可视化编辑 `curve_templates.json` |
+
+---
+
+## 🚀 快速启动
+
+1. 双击运行 `运行主程序.bat`
+2. 在 GUI 面板中选择所需工具
+3. 点击执行
+
+> **注意**：部分工具需要目标文档处于**打开状态**（通过 COM 接口实时通信）
+
+---
+
+## 🛡️ 安全机制
+
+执行破坏性操作前，系统会自动进行**静默克隆备份**，确保数据可恢复。
+
+---
+
+## 📂 目录结构
+
+```
+Civil_Auto_Workspace/
+├── 运行主程序.bat          # 启动入口
+├── handwrite_config.json  # 手写模拟配置
+├── pyproject.toml         # 项目配置
+├── README.md
+│
+├── 00_使用手册/            # 使用文档
+│
+├── 01_Input/              # 输入资源
+│   ├── 平均值生成检测值.xlsm
+│   ├── record_mapping.json
+│   └── fonts/             # 字体文件
+│
+├── 02_Core/               # 核心工具箱
+│   ├── main.py            # 统一调度入口
+│   ├── body_format.py     # 正文排版
+│   ├── table_format.py    # 表格排版
+│   ├── bracket_format.py # 括号纠偏
+│   ├── fix_cross_ref.py   # 引用修复
+│   ├── pipeline_sort_renumber.py  # 照片流水线
+│   ├── sort_photos.py     # 照片排序
+│   ├── renumber_photos.py # 照片重编号
+│   ├── plot_curves.py     # 批量绘图
+│   ├── word2pdf.py        # 文档转换
+│   ├── coord_picker.py    # 坐标拾取
+│   ├── auto_filler.py     # 手写模拟
+│   ├── config_editor.py  # 样式配置编辑器
+│   ├── curve_template_editor.py  # 曲线模板编辑器
+│   └── common/            # 公共组件库
+│
+├── 03_Output/             # 输出目录
+│
+├── 04_Config/             # 配置文件
+│   ├── report_style_config.json
+│   └── curve_templates.json
+│
+├── 05_JSA/                # WPS 脚本
+│
+└── 06_Report_Template/   # 报告模板
 ```
 
-### 启动流程
-1. 确保目标文档已保存并处于 **打开状态**（程序通过 COM 接口实时通信）。
-2. 运行根目录下的 `运行主程序.bat`。
-3. 在 GUI 面板中选择所需模块 $\to$ 点击执行。
-
 ---
 
-## 🛡️ 安全机制 | Safety First
-本项目内置 **`file_utils_backup.py`** 模块。在任何破坏性写入操作执行前，系统将自动进行**静默克隆备份**。即使发生意外，也能在毫秒级内恢复至操作前状态，确保工程数据的绝对安全。
+## ✍️ 作者
 
----
-
-## ✍️ 作者 | Author
 **ZGQ**  
-*Building the future of engineering automation.*
