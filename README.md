@@ -1,5 +1,5 @@
 # 🏗️ Civil Auto Workspace (CAW)
-> **工程报告自动化排版矩阵 V2.0**  
+> **工程报告自动化排版矩阵**  
 > *Transforming Engineering Reports from Manual Labor to Digital Precision.*
 
 ---

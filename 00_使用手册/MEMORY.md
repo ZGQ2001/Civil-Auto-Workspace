@@ -1,2 +1,0 @@
-- [工具箱式代码架构偏好](feedback_toolbox_architecture.md) — 02_Core 项目的 5 条工具组织原则：业务/UI 分离、common 共享、dataclass、动词命名、main 菜单
-- [工程检测报告自动化项目背景](project_context.md) — 桥梁/土建检测报告自动化工具集的领域背景与现有工具清单

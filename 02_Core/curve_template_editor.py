@@ -84,18 +84,18 @@ def read_excel_columns(excel_path: str, sheet_name: Optional[str] = None) -> Lis
 # ==========================================
 # 模块 2：UI 流程
 # ==========================================
-class CurveTemplateEditorApp:
-    def __init__(self, path: str = DEFAULT_TEMPLATES_PATH):
+class CurveTemplateEditorPanel(ctk.CTkFrame):
+    """曲线模板编辑器 —— CTkFrame，可被嵌入主控制台或独立窗口。"""
+
+    def __init__(self, master, path: str = DEFAULT_TEMPLATES_PATH, **kwargs):
+        kwargs.setdefault("fg_color", "transparent")
+        super().__init__(master, **kwargs)
+
         self.path = path
         self.templates: Dict[str, Any] = load_templates(path)
         self.current_name: Optional[str] = None
         self.dirty: bool = False
         self.excel_columns: List[str] = []  # 用户挂载 Excel 后填充
-
-        self.root = ctk.CTk()
-        self.root.title(f"曲线模板编辑器 - {os.path.basename(path)}")
-        self.root.geometry("1100x780")
-        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._build_layout()
         self._refresh_template_list()

@@ -88,25 +88,28 @@ def get_paragraph_types(config: Dict[str, Any], report_type: str) -> list:
 # ==========================================
 # 模块 2：UI 流程
 # ==========================================
-class ConfigEditorApp:
-    """样式配置可视化编辑器主窗口（独立运行）。"""
+class ConfigEditorPanel(ctk.CTkFrame):
+    """样式配置可视化编辑器 —— CTkFrame，可被嵌入任意父容器。
 
-    def __init__(self, config_path: str = DEFAULT_CONFIG_PATH):
+    主控制台 dashboard 把它 .pack() 进右侧内容区即可，无需 subprocess。
+    ConfigEditorApp 则把它包在独立的 CTk 窗口里，命令行直接跑时用。
+    """
+
+    def __init__(self, master, config_path: str = DEFAULT_CONFIG_PATH, **kwargs):
+        kwargs.setdefault("fg_color", "transparent")
+        super().__init__(master, **kwargs)
+
         self.config_path = config_path
         self.config: Dict[str, Any] = {}
-        self.dirty: bool = False  # 是否有未保存改动
-        self.field_widgets: Dict[str, Tuple[str, Any]] = {}  # field_key -> (kind, var/widget)
-
-        self.root = ctk.CTk()
-        self.root.title(f"报告样式配置编辑器 - {os.path.basename(config_path)}")
-        self.root.geometry("900x680")
-        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.dirty: bool = False
+        self.field_widgets: Dict[str, Tuple[str, Any]] = {}
 
         try:
             self.config = load_config(self.config_path)
         except Exception as e:
             messagebox.showerror("加载失败", f"读取配置文件出错:\n{e}")
-            self.root.destroy()
+            ctk.CTkLabel(self, text=f"⚠ 配置文件加载失败:\n{e}",
+                         font=("微软雅黑", 12), text_color="#aa3333").pack(pady=20)
             return
 
         self._build_layout()
@@ -115,7 +118,7 @@ class ConfigEditorApp:
     # ------------ 布局构建 ------------
     def _build_layout(self) -> None:
         # 顶部：当前文件 + 保存按钮
-        header = ctk.CTkFrame(self.root, fg_color="transparent")
+        header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=15, pady=(15, 5))
         ctk.CTkLabel(
             header, text=f"配置文件：{self.config_path}",
@@ -134,7 +137,7 @@ class ConfigEditorApp:
         ).pack(side="right", padx=4)
 
         # 主体：左右分栏
-        body = ctk.CTkFrame(self.root, fg_color="transparent")
+        body = ctk.CTkFrame(self, fg_color="transparent")
         body.pack(fill="both", expand=True, padx=15, pady=10)
 
         # 左侧：报告类型 + 段落列表
@@ -168,7 +171,7 @@ class ConfigEditorApp:
 
         # 底部：状态栏
         self.status_bar = ctk.CTkLabel(
-            self.root, text="就绪", font=("微软雅黑", 11), text_color="gray60", anchor="w",
+            self, text="就绪", font=("微软雅黑", 11), text_color="gray60", anchor="w",
         )
         self.status_bar.pack(fill="x", padx=15, pady=(0, 10))
 
@@ -328,21 +331,37 @@ class ConfigEditorApp:
     def _set_status(self, text: str) -> None:
         self.status_bar.configure(text=text)
 
-    def _on_close(self) -> None:
+    def request_close(self) -> bool:
+        """让外层窗口在关闭前问"是否放弃未保存修改"。返回是否真的可关。"""
         if self.dirty and not messagebox.askyesno("确认退出", "有未保存的修改，确定退出？"):
-            return
-        self.root.destroy()
+            return False
+        return True
+
+
+class ConfigEditorApp:
+    """独立窗口模式：把 ConfigEditorPanel 包在一个 CTk 窗口里。"""
+
+    def __init__(self, config_path: str = DEFAULT_CONFIG_PATH):
+        self._win = ctk.CTk()
+        self._win.title(f"报告样式配置编辑器 - {os.path.basename(config_path)}")
+        self._win.geometry("960x720")
+        self.panel = ConfigEditorPanel(self._win, config_path=config_path)
+        self.panel.pack(fill="both", expand=True)
+        self._win.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _on_close(self) -> None:
+        if self.panel.request_close():
+            self._win.destroy()
 
     def run(self) -> None:
-        self.root.mainloop()
+        self._win.mainloop()
 
 
 def _main() -> None:
     enable_line_buffered_stdout()
     ctk.set_appearance_mode("System")
     ctk.set_default_color_theme("blue")
-    app = ConfigEditorApp()
-    app.run()
+    ConfigEditorApp().run()
 
 
 if __name__ == "__main__":
