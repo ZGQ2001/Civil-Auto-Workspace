@@ -1,268 +1,68 @@
-"""
-===============================================================================
-脚本名称：仿生手写记录表生成器 (auto_filler.py)
-核心修复：
-    1. 解决空白问题：修复了 V9.4 图层叠加逻辑错误导致的文字不显示。
-    2. 小数点归位：放弃单字拆分，回归整行渲染，确保小数点老老实实待在数字下方。
-    3. 拒绝裁切：大幅增加贴纸缓冲区，并修正粘贴偏移坐标，确保长文本不再被切断。
-    4. 紧凑间距：通过 word_spacing 参数调节，实现自然紧凑的手写感。
-===============================================================================
-"""
-import os           # 处理文件路径
-import json         # 读取坐标映射
-import random       # 生成手写随机抖动
-import pandas as pd  # 处理 Excel 数据
-from typing import Optional
-from PIL import Image, ImageFont, ImageOps, ImageFilter  # 图像处理核心库
-from handright import Template, handwrite    # 仿生手写核心引擎
-
-# ---------------- 板块 1：全局路径配置 ----------------
-
-# 自动定位项目主文件夹
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-INPUT_DIR = os.path.join(BASE_DIR, "01_Input")
-OUTPUT_DIR = os.path.join(BASE_DIR, "03_Output")
-
-# 文件路径
-JSON_PATH = os.path.join(INPUT_DIR, "record_mapping.json")
-BASE_IMG_PATH = os.path.join(INPUT_DIR, "记录表.png")
-EXCEL_PATH = os.path.join(INPUT_DIR, "平均值生成检测值.xlsm")
-FONTS_DIR = os.path.join(INPUT_DIR, "fonts") # 指向存放多个字体的文件夹
-OUTPUT_PDF = os.path.join(OUTPUT_DIR, "自动生成_检测记录表.pdf")
-
-# 【目标 Sheet】：直接在这里改名字就行了，不要动其他代码了
-TARGET_SHEET = "Sheet2"
-
-# --- 仿生视觉参数微调 ---
-VERTICAL_DRIFT_FIX = -1.5   # 全局上下移动（负数上移，正数下移）
-GLOBAL_SIZE_LIMIT = 1.68    # 全局字号放大倍数
-ITEMS_PER_PAGE = 8          # 每张纸放 8 组数据
-
-# ---------------- 板块 2：仿生引擎核心函数 ----------------
-
-def load_config():
-    """读取 JSON 里的坐标和字号信息"""
-    with open(JSON_PATH, 'r', encoding='utf-8') as f:
-        cfg = json.load(f)
-    
-    # 将 Excel 字段映射到 JSON 里的框选区域
-    base_boxes = {
-        "name": cfg["构件名称"]["box"],
-        "val1": cfg["测点1"]["box"],
-        "val2": cfg["测点2"]["box"],
-        "val3": cfg["测点3"]["box"],
-        "avg": cfg["平均值"]["box"]
-    }
-    # 计算向右(dx)和向下(dy)跨步的距离
-    dx = cfg["右"]["box"][0] - cfg["构件名称"]["box"][0]
-    dy = (cfg["下"]["box"][1] - cfg["构件名称"]["box"][1]) + VERTICAL_DRIFT_FIX
-    
-    # 算出最终字号
-    font_size = int(cfg["构件名称"].get("font_size", 35) * GLOBAL_SIZE_LIMIT)
-    return base_boxes, dx, dy, font_size
-
-# 把 font_path 参数改成了 fonts_dir
-def create_handwritten_sticker(text, box, fonts_dir, font_size, fatigue_idx=0, total_items=1):
-    w, h = int(box[2]), int(box[3])
-    clean_text = str(text).strip()
-    
-    if clean_text in ['nan', 'None', '']:
-        return Image.new("RGBA", (1, 1), (0, 0, 0, 0))
-
-    font_files = [os.path.join(fonts_dir, f) for f in os.listdir(fonts_dir) if f.endswith(('.ttf', '.otf'))]
-    if not font_files:
-        raise ValueError("报错啦：01_Input/fonts 文件夹中没有找到任何字体文件！")
-
-    fatigue_boost = min(1.3, 1.0 + (fatigue_idx / total_items))
-    current_size = font_size
-    final_wrapped_text = ""
-    
-    # --- 阶段 A：智能排版逻辑 ---
-    # 先用第一个字体作为“基准尺子”把合适的字号算出来
-    while current_size > 10:
-        font_ruler = ImageFont.truetype(font_files[0], current_size)
-        if font_ruler.getlength(clean_text) <= (w * 1.20):
-            final_wrapped_text = clean_text
-            lines_count = 1
-            break
-        
-        lines = []
-        cur_line = ""
-        for char in clean_text:
-            if font_ruler.getlength(cur_line + char) <= (w * 1.1):
-                cur_line += char
-            else:
-                if cur_line: lines.append(cur_line)
-                cur_line = char
-        lines.append(cur_line)
-        
-        line_h = int(current_size * 1.15)
-        if (len(lines) * line_h) <= (h + 10):
-            final_wrapped_text = "\n".join(lines)
-            lines_count = len(lines)
-            break
-        current_size -= 2 
-    else:
-        final_wrapped_text, lines_count, current_size = clean_text, 1, 12
-
-    # =========== 【核心炸墙操作：单字盲盒底层劫持】 ===========
-    
-    # 1. 把所有字体按最终字号全部加载成弹药库
-    multi_fonts = [ImageFont.truetype(f, current_size) for f in font_files]
-    
-    # 2. 拿第一个字体作为“傀儡”传给引擎，避免引擎报错
-    font_ruler = multi_fonts[0]
-    
-    # 3. 拦截底层渲染方法：每次底层准备画一个单字时，随机返回弹药库里一个字体的像素
-    # =========== 【核心炸墙操作：单字盲盒底层劫持】 ===========
-    multi_fonts = [ImageFont.truetype(f, current_size) for f in font_files]
-    font_ruler = multi_fonts[0]
-    
-    # 【新增记忆变量】：记住刚刚写上一笔用的是哪支笔
-    last_used_font = None 
-
-    def random_getmask2(text, mode="", *args, **kwargs):
-        nonlocal last_used_font # 声明我们要修改外面的记忆变量
-        
-        # 核心逻辑：从抽奖池里，把上次用的那支笔拿出去（除非你只有1个字体）
-        available_fonts = [f for f in multi_fonts if f != last_used_font]
-        if not available_fonts:
-            available_fonts = multi_fonts
-            
-        # 从剩下的笔里面抽，确保100%不一样
-        chosen = random.choice(available_fonts)
-        last_used_font = chosen # 更新记忆
-        return chosen.getmask2(text, mode=mode, *args, **kwargs)
-        
-    def random_getmask(text, mode="", *args, **kwargs):
-        nonlocal last_used_font
-        available_fonts = [f for f in multi_fonts if f != last_used_font]
-        if not available_fonts:
-            available_fonts = multi_fonts
-        chosen = random.choice(available_fonts)
-        last_used_font = chosen
-        return chosen.getmask(text, mode=mode, *args, **kwargs)
-
-    font_ruler.getmask2 = random_getmask2
-    font_ruler.getmask = random_getmask
-    # =========================================================================
-
-    # 强行替换掉傀儡字体的底层方法
-    font_ruler.getmask2 = random_getmask2
-    font_ruler.getmask = random_getmask
-    # =========================================================================
-
-    # --- 阶段 B：物理墨水渲染 ---
-    canvas_w, canvas_h = w + 200, h + 150
-    bg = Image.new("L", (canvas_w, canvas_h), 255) 
-    total_text_h = lines_count * int(current_size * 1.15)
-    top_pos = (canvas_h - total_text_h) // 2
-
-    # 引擎参数设置：释放被压制的随机性，让单字彻底抖起来！
-    template = Template(
-        background=bg, 
-        font=font_ruler,  # 传入我们的“傀儡”字体
-        line_spacing=int(current_size * 1.15),
-        fill=0, 
-        left_margin=100, top_margin=top_pos, 
-        word_spacing=-5,  # 【修改这里】：把原来的 word_spacing=-2，改成更极端的负数！
-        line_spacing_sigma=1.0,               
-        
-        # 【全量释放随机感】
-        font_size_sigma=current_size * 0.08,  # 字号大小随机波动（约8%）
-        word_spacing_sigma=1.0,               # 字距随机波动
-        perturb_x_sigma=1.5 * fatigue_boost,  # 左右位移波动
-        perturb_y_sigma=0.5 * fatigue_boost,  # 上下位移波动
-        perturb_theta_sigma=0.06 * fatigue_boost # 允许文字产生倒歪倾斜
-    )
-    
-    try:
-        raw_img = list(handwrite(final_wrapped_text, template))[0]
-        mask = ImageOps.invert(raw_img) 
-        
-        # 物理渗墨滤镜
-        mask = mask.filter(ImageFilter.GaussianBlur(radius=0.4)) 
-        ink_layer = Image.new("RGBA", (canvas_w, canvas_h), (40, 45, 50, 235)) 
-        
-        sticker = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
-        sticker.paste(ink_layer, (0, 0), mask)
-        
-        return sticker
-    except Exception as e:
-        print(f"贴纸渲染出错: {e}")
-        return Image.new("RGBA", (1, 1), (0, 0, 0, 0))
-
-# ---------------- 板块 3：主程序自动化流程 ----------------
+import threading
+# 把需要的 UI 组件全部引入进来
+from ui_components import ModernHandwriteDialog, ModernMappingDialog, ModernProgressConsole, ModernInfoDialog
+# 引入我们刚才改好的引擎
+from auto_filler_core import run_generator
 
 def main():
-    # 准备输出环境
-    if not os.path.exists(OUTPUT_DIR): os.makedirs(OUTPUT_DIR)
+    print(">>> 启动阶段 1：基础配置")
+    stage1_dialog = ModernHandwriteDialog()
+    stage1_data = stage1_dialog.show()
     
-    print(f"🚀 正在启动 ...")
-    base_boxes, dx, dy, final_font_size = load_config()
-    
-    # 读取 Excel 数据，指定 Sheet2
-    df = pd.read_excel(EXCEL_PATH, sheet_name=TARGET_SHEET, header=None, engine='openpyxl')
-    df[0] = df[0].ffill() # 处理合并单元格
-    
-    # 1. 准备一个空的“总清单”，用来存放后面整理出来的构件数据包。
-    items = []
+    if not stage1_data:
+        print("已取消操作。")
+        return
 
-# 2. 开启核心循环：从第 0 行开始，到表格结束，每次“跨步”跳过 4 行走。
-#    为什么要跳 4 行？因为 Excel 里每 4 行才构成一个完整的检测单元。
-    for i in range(0, len(df), 4):
+    json_path = stage1_data.get("json_path")
+    if not json_path:
+        print("❌ 未选择 JSON 文件！")
+        return
 
-    # 3. 安全卫士：检查剩下的行数还够不够 4 行。
-    #    如果剩下的行数凑不齐 4 行了，说明数据已经拿完了，直接跳出循环，防止电脑报错。
-        if i + 3 >= len(df): break
+    print(">>> 启动阶段 2：数据映射")
+    stage2_dialog = ModernMappingDialog(json_path)
+    stage2_data = stage2_dialog.show()
 
-    # 4. 裁切动作：从总表里精准地把这连着的 4 行数据整体抠出来，存入临时变量 chunk（小块）中。
-        chunk = df.iloc[i:i+4]
+    # =========== 核心改动：多线程与进度条接入 ===========
+    if stage2_data:
+        print(">>> 启动阶段 3：多线程引擎点火")
 
-    # 5. 组装动作：从抠出来的这 4 行里，按照坐标位置提取精华，打包成一个“身份卡”存入清单。
-        items.append({
-        "name": chunk.iloc[0, 0], # 拿第 1 行、第 1 列的数据，也就是“构件名称”
-        "val1": chunk.iloc[0, 2], # 拿第 1 行、第 3 列的数据，也就是“实测值 1”
-        "val2": chunk.iloc[1, 2], # 拿第 2 行、第 3 列的数据，也就是“实测值 2”
-        "val3": chunk.iloc[2, 2], # 拿第 3 行、第 3 列的数据，也就是“实测值 3”
-        "avg":  chunk.iloc[3, 2]  # 拿第 4 行、第 3 列的数据，也就是最后的“平均值”
-        })
-    
-    total_count = len(items)
-    pages: list[Image.Image] = []
-    current_page_img = None
-    
-    # 循环填表
-    for idx, item in enumerate(items):
-        pos_index = idx % ITEMS_PER_PAGE
-        
-        # 换页逻辑
-        if pos_index == 0:
-            if current_page_img: pages.append(current_page_img.convert('RGB'))
-            current_page_img = Image.open(BASE_IMG_PATH).convert('RGBA')
-            print(f"📄 正在合成第 {len(pages) + 1} 页 ...")
-            
-        col, row = pos_index % 2, pos_index // 2
-        cur_dx, cur_dy = col * dx, row * dy
-        
-        for key in ["name", "val1", "val2", "val3", "avg"]:
-            bx, by, bw, bh = base_boxes[key]
-            tx, ty = int(bx + cur_dx), int(by + cur_dy)
-            
-            # 把原先单字体的 FONT_PATH 替换为字体文件夹 FONTS_DIR
-            sticker = create_handwritten_sticker(item[key], [tx, ty, bw, bh], FONTS_DIR, final_font_size, idx, total_count)
-            
-            # 【重要修正】：粘贴坐标偏移对齐
-            # 因为贴纸画布左右多加了 100 像素，上下多加了 75 像素（中心点对齐）
-            # 所以粘贴时要往回挪 100 和 75，才能让字落在格子正中
-            assert current_page_img is not None  # pos_index==0 时已完成初始化，此处必非 None
-            current_page_img.paste(sticker, (tx - 100, ty - 75), sticker)
-            
-    # 保存成品 PDF
-    if current_page_img: pages.append(current_page_img.convert('RGB'))
-    if pages:
-        pages[0].save(OUTPUT_PDF, save_all=True, append_images=pages[1:], resolution=300)
-        print(f"结束！请查收：{OUTPUT_PDF}")
+        progress_ui = ModernProgressConsole("仿生手写引擎运行中", max_val=100)
+
+        # 准备一个安全的“战报小本本”，记录后台的干活结果
+        work_result = {"success": False, "error": None}
+
+        # 2. 定义后台干活的“右手”（子线程任务）
+        def engine_worker():
+            try:
+                # 引擎呼叫 update_progress（现在已经是安全的丢纸条操作了）
+                success = run_generator(stage1_data, stage2_data, progress_console=progress_ui)
+                
+                if success and not progress_ui.is_cancelled:
+                    progress_ui.update_progress(progress_ui.max_val, "🎉 全部任务生成完毕！")
+                    work_result["success"] = True # 在小本本上记一笔“成功”
+            except Exception as e:
+                work_result["error"] = str(e)
+                progress_ui.update_progress(0, f"❌ 发生致命错误: {e}")
+                print(f"详细报错: {e}")
+            finally:
+                import time
+                time.sleep(0.5) # 给用户留半秒钟看一眼 100% 的进度
+                progress_ui.close() # 安全发送关窗纸条
+
+        # 3. 启动后台线程开始干活
+        t = threading.Thread(target=engine_worker, daemon=True)
+        t.start()
+
+        # 4. 主线程（左手）在这里原地发呆，全心全意维护进度条，直到进度条窗口被销毁
+        progress_ui.root.grab_set()
+        progress_ui.root.master.wait_window(progress_ui.root)
+
+        # 💡 5. 【极其关键】：进度条关掉后，主线程代码继续往下走！
+        # 此时已经回到了主线程的安全区，想怎么弹窗就怎么弹窗！
+        if work_result["success"]:
+            ModernInfoDialog("生成成功", "所有手写记录表已完美生成并保存为 PDF！").show()
+        elif work_result["error"]:
+            ModernInfoDialog("发生错误", f"引擎异常中断：\n{work_result['error']}").show()
 
 if __name__ == "__main__":
     main()

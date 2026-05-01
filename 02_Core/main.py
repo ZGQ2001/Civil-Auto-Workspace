@@ -21,7 +21,7 @@ class MainDashboard:
     def __init__(self, root):
         self.root = root
         self.root.title("工程自动化程序 V0.1.1 - 主控制台")
-        self.root.geometry("450x740")
+        self.root.geometry("450x760")
         self.root.resizable(False, False)
         
         # 顶部标题区
@@ -39,11 +39,11 @@ class MainDashboard:
             ("报告表格排版引擎", "table_format.py"),
             ("全局括号半全角纠偏", "bracket_format.py"),
             ("交叉引用格式修复", "fix_cross_ref.py"),
+            ("样式配置编辑器", "config_editor.py"),
             ("文档转换小工具", "word2pdf.py"),
             ("PNG坐标选择器", "coord_picker.py"),
-            ("手写模拟小工具", "auto_filler_v2.py"),
-            ("照片按缺陷清单排序", "sort_photos.py"),
-            ("照片题注重编号", "renumber_photos.py"),
+            ("手写模拟小工具", "auto_filler.py"),
+            ("照片流水线（排序+重编号）", "pipeline_sort_renumber.py"),
         ]
 
         for text, script in modules:

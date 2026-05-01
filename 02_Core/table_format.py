@@ -7,18 +7,20 @@
     V3.0 现代UI重构版：全面接入全局防吞窗 UI 组件库，加入时间限流防卡死机制。
 ===============================================================================
 """
-import os  
-import sys  
-import json  
-import re  
+import os
+import sys
+import json
+import re
 import time
-import win32com.client  
 
-# ---------------- 自定义模块集成 ----------------
-from word_env_utils import word_optimized_environment
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from file_utils_backup import backup_current_document
-# 引入统一现代UI库
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _THIS_DIR not in sys.path:
+    sys.path.insert(0, _THIS_DIR)
+
+import win32com.client
+
+from common.file_utils import backup_current_document
+from common.word_com import word_optimized_environment
 from ui_components import ModernParamDialog, ModernProgressConsole, ModernInfoDialog, ModernConfirmDialog
 
 # ---------------- 1. 配置与规则读取 ----------------

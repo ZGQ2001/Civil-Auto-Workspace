@@ -11,16 +11,19 @@
 # ---------------- 基础标准库 ----------------
 import os  
 import sys  
-import json  
-import re  
-import win32com.client  
-import pythoncom  
+import json
+import re
 import time
 
-# ---------------- 自定义模块集成 ----------------
-from word_env_utils import word_optimized_environment
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from file_utils_backup import backup_current_document
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _THIS_DIR not in sys.path:
+    sys.path.insert(0, _THIS_DIR)
+
+import win32com.client
+import pythoncom
+
+from common.file_utils import backup_current_document
+from common.word_com import word_optimized_environment
 from ui_components import ModernParamDialog, ModernProgressConsole, ModernInfoDialog, ModernConfirmDialog
 
 # ==================== 板块 1：配置与规则大脑 ====================

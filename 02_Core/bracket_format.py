@@ -9,11 +9,14 @@
 """
 import os
 import sys
+
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _THIS_DIR not in sys.path:
+    sys.path.insert(0, _THIS_DIR)
+
 import win32com.client
 
-# 挂载外部备份模块（与正文、表格脚本共用）
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from file_utils_backup import backup_current_document
+from common.file_utils import backup_current_document
 from ui_components import ModernConfirmDialog, ModernInfoDialog
 
 # 接收死锁的 target_doc 对象，而不是仅仅接收一个字符串名字
