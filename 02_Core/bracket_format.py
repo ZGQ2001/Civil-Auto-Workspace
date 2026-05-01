@@ -17,6 +17,7 @@ if _THIS_DIR not in sys.path:
 import win32com.client
 
 from common.file_utils import backup_current_document
+from common.patterns import WordWildcards
 from ui_components import ModernConfirmDialog, ModernInfoDialog
 
 # 接收死锁的 target_doc 对象，而不是仅仅接收一个字符串名字
@@ -43,35 +44,11 @@ def process_brackets(app, target_doc):
     rng = target_doc.Content
     fnd = rng.Find
     
-    # 构建正则通配符替换规则集
+    # 替换规则全部上提到 common.patterns.WordWildcards，便于跨工具复用与统一维护。
+    # 顺序敏感：先抹平基准 → 技术参数转半角 → 国标/书名号/数字序号锁全角 → "第N"反向修正
     rules = [
-        # 1. 清洗环境基准：全部抹平为全角
-        {"f": "(", "r": "（", "wc": False},
-        {"f": ")", "r": "）", "wc": False},
-        
-        # 2. 波浪号纠偏：修复输入法打出的全角波浪号
-        {"f": "～", "r": "~", "wc": False},
-        
-        # 3. 提取技术参数转为半角 (涵盖尺寸、单位、公式等，- 必须放在方括号最末尾)
-        {"f": r"（([a-zA-Z0-9 .,/\\_~—–:%°+=±×÷·　-]@)）", "r": r"(\1)", "wc": True},
-        
-        # 4. 特例纠偏 - 标准代号强制全角（针对 GB/T, JGJ, DB 等国标/行标规范）
-        # 特征：以至少2个大写字母开头，包含大写字母、数字、斜杠、空格、点号、冒号、中划线
-        {"f": r"\(([A-Z]{2,}[A-Z0-9/ \.:　-]@)\)", "r": r"（\1）", "wc": True},
-        
-        # 5. 特例纠偏 - 书名号标准代号锁定全角（兜底无前缀的标准或企标 Q/ 等）
-        # [!)] 表示匹配除了半角右括号之外的任意字符，避开 Word 对反斜杠的底层转义限制
-        {"f": r"》\(([!)]@)\)", "r": r"》（\1）", "wc": True},
-        {"f": r"》 \(([!)]@)\)", "r": r"》 （\1）", "wc": True},
-        {"f": r"》　\(([!)]@)\)", "r": r"》　（\1）", "wc": True},
-        
-        # 6. 特例纠偏 - 中文纯数字层级序号锁定全角 (1), (2) -> （1）, （2）
-        {"f": r"\(([0-9]@)\)", "r": r"（\1）", "wc": True},
-        
-        # 7. 锚定排除 - 编号“第(xxx)”保留半角，抗击第6步误伤
-        {"f": r"第（([0-9]@)）", "r": r"第(\1)", "wc": True},
-        {"f": r"第 （([0-9]@)）", "r": r"第 (\1)", "wc": True},
-        {"f": r"第　（([0-9]@)）", "r": r"第　(\1)", "wc": True}
+        {"f": find_pat, "r": replace_pat, "wc": use_wildcards}
+        for find_pat, replace_pat, use_wildcards in WordWildcards.bracket_normalize_rules()
     ]
 
     app.ScreenUpdating = False

@@ -12,7 +12,6 @@
 import os  
 import sys  
 import json
-import re
 import time
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -23,6 +22,13 @@ import win32com.client
 import pythoncom
 
 from common.file_utils import backup_current_document
+from common.patterns import (
+    APPRAISAL_CONCLUSION_HEADER_PATTERN, APPRAISAL_CONCLUSION_L2_PATTERN,
+    BASIS_TITLE_PATTERN, BLANK_HINT_PATTERN, BULLET_LIST_ITEM_PATTERN,
+    FIG_OR_TBL_CAPTION_PATTERN, HEADING_L1_PATTERN, HEADING_L2_PATTERN,
+    HEADING_L3_PATTERN, NO_INDENT_START_PATTERN, NOTE_LABEL_PATTERN,
+    NUMBERED_LIST_ITEM_PATTERN, SUGGESTION_TITLE_PATTERN, clean_word_text,
+)
 from common.word_com import word_optimized_environment
 from ui_components import ModernParamDialog, ModernProgressConsole, ModernInfoDialog, ModernConfirmDialog
 
@@ -40,23 +46,21 @@ def load_style_config(report_type="检测报告"):
 
 class ParagraphClassifier:
     def __init__(self):
-        self.re_fig_tbl = re.compile(r'^\s*(图|表)\s*(\d+(\.\d+)*)')
-        self.re_note = re.compile(r'^\s*(注|说明)\s*[：:]')
-        self.re_list_item = re.compile(r'^(\d+[.、）\)]|[①②③④⑤⑥⑦⑧⑨⑩])')
-        self.re_blank = re.compile(r'.*[（(]?(本页)?以下空白[）)].*')
-        self.re_no_indent = re.compile(r'^\s*[《\(\[（]')
-        self.re_h1 = re.compile(r'^(\d+[\.\s\u3000\t]+|[一二三四五六七八九十]+[、\.\s\u3000\t]+)')
-        self.re_h2 = re.compile(r'^\d+[\.．]\d+[\s\u3000\t]*')
-        self.re_h3 = re.compile(r'^\d+[\.．]\d+[\.．]\d+[\s\u3000\t]*')
-        self.re_appr_c_h1 = re.compile(r'^[检\s·]*测[\s·]*结[\s·]*论[\s·]*与[\s·]*建[\s·]*议$')
-        self.re_appr_c_h2 = re.compile(r'^\d+[\.．\s\u3000\t]+[\u4e00-\u9fa5]+')
-        self.re_basis_title = re.compile(r'^[\d\.．\s\u3000\t]*(检测|鉴定)依据.*')
-        self.re_suggest_title = re.compile(r'^[处\s]*理[\s]*建[\s]*议$')
+        self.re_fig_tbl = FIG_OR_TBL_CAPTION_PATTERN
+        self.re_note = NOTE_LABEL_PATTERN
+        self.re_list_item = NUMBERED_LIST_ITEM_PATTERN
+        self.re_blank = BLANK_HINT_PATTERN
+        self.re_no_indent = NO_INDENT_START_PATTERN
+        self.re_h1 = HEADING_L1_PATTERN
+        self.re_h2 = HEADING_L2_PATTERN
+        self.re_h3 = HEADING_L3_PATTERN
+        self.re_appr_c_h1 = APPRAISAL_CONCLUSION_HEADER_PATTERN
+        self.re_appr_c_h2 = APPRAISAL_CONCLUSION_L2_PATTERN
+        self.re_basis_title = BASIS_TITLE_PATTERN
+        self.re_suggest_title = SUGGESTION_TITLE_PATTERN
 
     def classify(self, text, list_string="", is_in_note_mode=False, is_in_basis_mode=False, is_in_conclusion_mode=False, report_type="检测报告"):
-        raw_text = f"{list_string}{text}"
-        clean_text = re.sub(r'\x13.*?\x14', '', raw_text)
-        clean_text = re.sub(r'[\x13\x14\x15\x07\x01\x02]', '', clean_text).replace('\xa0', ' ').strip()
+        clean_text = clean_word_text(f"{list_string}{text}")
         
         if not clean_text: return "空行"
         if self.re_blank.search(clean_text): return "空白提示"
@@ -220,13 +224,13 @@ def process_document_body(app, doc, params):
                 elif para_type not in ["表注说明_延续", "空行"]: note_mode = False
                     
                 if para_type == "标准正文":
-                    if re.match(r'^(\d+[.、）\)]|[①②③④⑤⑥⑦⑧⑨⑩])', text.strip()):
+                    if NUMBERED_LIST_ITEM_PATTERN.match(text.strip()):
                         manual_list_skip_count += 1
                         try: para.Range.Font.Color = 255 
                         except: pass
                         continue 
                     
-                if para_type == "标准正文" and re.match(r'^[\s]*[•\-*]\s+', text.strip()):
+                if para_type == "标准正文" and BULLET_LIST_ITEM_PATTERN.match(text.strip()):
                     para_type = "无缩进正文"
                     
                 if para_type in full_config:

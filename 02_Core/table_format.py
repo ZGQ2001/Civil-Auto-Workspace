@@ -10,7 +10,6 @@
 import os
 import sys
 import json
-import re
 import time
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -20,6 +19,7 @@ if _THIS_DIR not in sys.path:
 import win32com.client
 
 from common.file_utils import backup_current_document
+from common.patterns import CELL_BLANK_NOISE_PATTERN, CELL_FULL_NOISE_PATTERN
 from common.word_com import word_optimized_environment
 from ui_components import ModernParamDialog, ModernProgressConsole, ModernInfoDialog, ModernConfirmDialog
 
@@ -139,7 +139,7 @@ def process_all_tables(app, target_doc):
                     # A. 表名判定与 JSON 规则下发
                     try:
                         title_range = tbl.Range.Previous(4, 1)
-                        if title_range and re.sub(r'[\s\x07]', '', title_range.Text).startswith("表"):
+                        if title_range and CELL_BLANK_NOISE_PATTERN.sub('', title_range.Text).startswith("表"):
                             tf = title_range.Font
                             eng_font = title_cfg["english_font"]
                             tf.Name = eng_font
@@ -167,7 +167,7 @@ def process_all_tables(app, target_doc):
                     cells = tbl.Range.Cells
                     for j in range(1, cells.Count + 1):
                         cell = cells.Item(j)
-                        clean_text = re.sub(r'[\r\n\x07\s]', '', cell.Range.Text)
+                        clean_text = CELL_FULL_NOISE_PATTERN.sub('', cell.Range.Text)
                         
                         if not clean_text:
                             cell.Shading.BackgroundPatternColor = config.empty_cell_color
