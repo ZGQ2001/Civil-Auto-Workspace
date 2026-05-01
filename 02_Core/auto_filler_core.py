@@ -258,6 +258,7 @@ def run_generator(stage1_config, stage2_mapping, progress_console=None):
                 total_items=total_count
             )
             
+            assert current_page_img is not None  # pos_index==0 时已完成初始化，此处必非 None
             current_page_img.paste(sticker, (tx - 100, ty - 75), sticker)
             # 【新增】：每画完一组数据，就向 UI 汇报一次进度
             if progress_console:

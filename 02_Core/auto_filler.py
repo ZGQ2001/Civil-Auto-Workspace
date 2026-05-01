@@ -12,6 +12,7 @@ import os           # 处理文件路径
 import json         # 读取坐标映射
 import random       # 生成手写随机抖动
 import pandas as pd  # 处理 Excel 数据
+from typing import Optional
 from PIL import Image, ImageFont, ImageOps, ImageFilter  # 图像处理核心库
 from handright import Template, handwrite    # 仿生手写核心引擎
 
@@ -228,7 +229,7 @@ def main():
         })
     
     total_count = len(items)
-    pages = []
+    pages: list[Image.Image] = []
     current_page_img = None
     
     # 循环填表
@@ -254,6 +255,7 @@ def main():
             # 【重要修正】：粘贴坐标偏移对齐
             # 因为贴纸画布左右多加了 100 像素，上下多加了 75 像素（中心点对齐）
             # 所以粘贴时要往回挪 100 和 75，才能让字落在格子正中
+            assert current_page_img is not None  # pos_index==0 时已完成初始化，此处必非 None
             current_page_img.paste(sticker, (tx - 100, ty - 75), sticker)
             
     # 保存成品 PDF
