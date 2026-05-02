@@ -1,142 +1,128 @@
-# 🏗️ Civil Auto Workspace (CAW)
-
-> **工程报告自动化工具箱**  
-> *让工程师回归专业分析，而非陷于机械劳动。*
-
+# Civil-Auto-Workspace (CAW)
+## 前言
+本人为土木工程检测相关专业从业人员，业余时间利用 Claude 开发了这款自动化工具箱。本文档总结了我在开发过程中遵循的核心原则、验收标准以及工具介绍，旨在确保每一个功能都能真正解决工程师的痛点，并且在实际应用中表现出色。
+所有开发都必须围绕两个核心判断：
+1. 是否真正减少工程师重复劳动
+2. 是否能在真实项目中稳定运行
 ---
-**声明**：本人为土木工程专业毕业生，从事工程检测相关行业，非专业代码工程师，开发本工具箱纯属业余爱好，大部分代码均为AI编写。
+任何新功能上线前，必须能够通过以下六项测试:
+
+1. 新手测试:
+一个刚入职的应届生，不看说明书，能否靠“示例模板”和“悬停提示”在 5 分钟内走通核心流程？
+
+2. 极限测试:
+导入 500 页报告、200 张图表或上万条数据时，UI 是否保持流畅，不假死，进度是否准确？
+
+3. 变更测试:
+甲方要求把所有图表的“红色实线”改为“蓝色虚线”，能否通过修改配置文件在 1 分钟内全局生效？
+
+4. 溯源测试:
+最终生成的 Word 报告，能否追溯到具体哪一天、哪个原始文件、哪次处理动作？
+
+5. 断电测试:
+软件运行中途被强制关闭后，再次打开时，能否从临时快照或备份中恢复到灾难前状态？
+
+6. 升级测试:
+国家或地方规范更新后，能否只替换底层算法模块，而不改动 UI 框架与主体流程？
 ---
-
-## 🌟 项目愿景
-
-在传统的工程检测与鉴定工作中，工程师日常需要处理大量零散但重复的任务：格式调整、表格整理、照片排序、批量出图、文档转换……
-
-**Civil Auto Workspace (CAW)** 正是为这些场景设计的一个**工具箱**——每个工具独立运行，通过统一的图形界面调度。
-
-### 核心哲学：配置-执行解耦
-
-CAW 采用了**「配置-执行」解耦架构**。通过将样式标准（字体、字号、间距等）完全定义在 `JSON` 配置文件中，实现了逻辑代码与业务标准的彻底分离。这意味着：**无需修改代码，通过调整配置即可适配不同的报告标准。**
-
----
-
-## 🛠️ 技术栈
-
-| 类别 | 技术 |
-|------|------|
-| **语言** | Python 3.11+ |
-| **Office 自动化** | `pywin32` (COM Interface for Word/WPS) |
-| **PDF 处理** | `pypdf` / `PyMuPDF (fitz)` |
-| **图像处理** | `Pillow` / `Matplotlib` |
-| **GUI 框架** | `customtkinter` / `tkinter` |
-
----
-
-## 🧰 工具箱
-
-### 📝 报告排版工具
-
-| 工具 | 功能 |
-|------|------|
-| **正文排版引擎** | 基于语义层级自动识别，套用 JSON 配置的字体、间距、缩进、大纲级别 |
-| **表格排版引擎** | 统一表格字号、行高、表名样式，**空单元格自动标红**质量校验 |
-| **括号半全角纠偏** | 通过 Word 通配符引擎全局规范：技术参数转半角、国标代号锁全角 |
-| **交叉引用修复** | 为所有 REF 域追加 `\* MERGEFORMAT`，避免格式丢失 |
-
-### 📷 照片附录工具
-
-| 工具 | 功能 |
-|------|------|
-| **照片流水线** | 一键完成：按 Excel 缺陷清单顺序重排 Word 表格图片 → 题注重编号 → 同步改 Excel 引用 |
-| **照片排序** | 按 Excel 顺序重排 Word 文档中的图片 |
-| **照片重编号** | 按顺序重编号图片题注 |
-
-### 📊 数据绘图工具
-
-| 工具 | 功能 |
-|------|------|
-| **批量绘图** | 从 Excel 读取数据，套用模板批量出 PNG 曲线图 |
-
-### 📄 文档转换工具
-
-| 工具 | 功能 |
-|------|------|
-| **Word → PDF** | Word 文档批量转换为 PDF |
-| **PDF → Word** | PDF 转回 Word 文档 |
-| **PDF 合并** | 多个 PDF 合并为一个 |
-
-### 🎨 图形处理工具
-
-| 工具 | 功能 |
-|------|------|
-| **PNG 坐标拾取器** | 在图片上框选区域，输出像素坐标 JSON |
-| **手写模拟生成器** | 读 Excel + PNG 底图 + 坐标 → 仿生手写体填表，导出 PDF |
-
-### ⚙️ 配置编辑器
-
-| 工具 | 功能 |
-|------|------|
-| **报告样式配置** | 可视化编辑 `report_style_config.json` |
-| **曲线模板配置** | 可视化编辑 `curve_templates.json` |
-
----
-
-## 🚀 快速启动
-
-1. 双击运行 `运行主程序.bat`
-2. 在 GUI 面板中选择所需工具
-3. 点击执行
-
-> **注意**：部分工具需要目标文档处于**打开状态**（通过 COM 接口实时通信）
-
----
-
-## 🛡️ 安全机制
-
-执行破坏性操作前，系统会自动进行**静默克隆备份**，确保数据可恢复。
-
----
-
-## 📂 目录结构
-
+## 目录结构
 ```
-Civil_Auto_Workspace/
-├── 运行主程序.bat          # 启动入口
-├── handwrite_config.json  # 手写模拟配置
-├── pyproject.toml         # 项目配置
-├── README.md
+[Project-Root-Name]/                       # 项目根目录
+├── .venv/                                 # Python 虚拟环境
+├── .vscode/                               # VS Code 配置
+├── .env                                   # 本地环境变量，不提交 Git
+├── .gitignore                             # Git 忽略规则
+├── config.yaml                            # 外部配置文件：业务参数、路径、阈值等
+├── pyproject.toml                         # 项目元数据、依赖、构建配置
+├── requirements.txt                       # 运行依赖清单
+├── README.md                              # 项目说明文档
+├── run.bat                                # Windows 一键启动脚本
 │
-├── 00_使用手册/            # 使用文档
+├── scripts/                               # 维护脚本目录
+│   ├── build_exe.bat                      # 打包脚本
+│   └── init_project.py                    # 自动初始化目录/文件脚本
 │
-├── 01_Input/              # 输入资源
-│   ├── 平均值生成检测值.xlsm
-│   ├── record_mapping.json
-│   └── fonts/             # 字体文件
+├── data/                                  # 数据仓库，不建议纳入 Git
+│   ├── raw/                               # 原始输入数据
+│   └── output/                            # 输出结果、生成报告
 │
-├── 02_Core/               # 核心工具箱
-│   ├── main.py            # 统一调度入口
-│   ├── body_format.py     # 正文排版
-│   ├── table_format.py    # 表格排版
-│   ├── bracket_format.py # 括号纠偏
-│   ├── fix_cross_ref.py   # 引用修复
-│   ├── pipeline_sort_renumber.py  # 照片流水线
-│   ├── sort_photos.py     # 照片排序
-│   ├── renumber_photos.py # 照片重编号
-│   ├── plot_curves.py     # 批量绘图
-│   ├── word2pdf.py        # 文档转换
-│   ├── coord_picker.py    # 坐标拾取
-│   ├── auto_filler.py     # 手写模拟
-│   ├── config_editor.py  # 样式配置编辑器
-│   ├── curve_template_editor.py  # 曲线模板编辑器
-│   └── common/            # 公共组件库
+├── logs/                                  # 日志目录
 │
-├── 03_Output/             # 输出目录
+├── templates/                             # 模板中心
+│   ├── docx/                              # Word 模板
+│   └── xlsx/                              # Excel 模板
 │
-├── 04_Config/             # 配置文件
-│   ├── report_style_config.json
-│   └── curve_templates.json
+├── tests/                                 # 自动化测试
+│   ├── test_core/                         # 业务逻辑测试
+│   ├── test_io/                           # IO 层测试
+│   └── test_config/                       # 配置加载测试
 │
-├── 05_JSA/                # WPS 脚本
-│
-└── 06_Report_Template/   # 报告模板
-```
+└── src/                                   # 源代码根目录
+    └── [package_name]/                    # 项目主包名，必须使用 snake_case
+        ├── __init__.py
+        ├── main.py                        # 程序唯一入口：初始化配置、日志、主窗口
 
+        ├── app/                           # 应用装配层：负责启动与依赖组织
+        │   ├── __init__.py
+        │   └── bootstrap.py               # 启动初始化逻辑：配置、日志、窗口挂载
+
+        ├── ui/                            # 视图层：只放界面相关代码
+        │   ├── __init__.py
+        │   ├── windows/                   # 主窗口、详情窗口等
+        │   │   ├── __init__.py
+        │   │   ├── main_window.py         # 主界面窗口
+        │   │   └── detail_window.py       # 详情/子功能窗口
+        │   ├── components/                # 可复用控件
+        │   │   ├── __init__.py
+        │   │   ├── search_box.py          # 搜索框
+        │   │   ├── parameter_panel.py      # 参数配置面板
+        │   │   ├── log_panel.py           # 日志面板
+        │   │   ├── preview_panel.py       # 预览面板
+        │   │   ├── table_editor.py        # 表格编辑器
+        │   │   └── progress_bar.py        # 进度条/状态显示组件
+        │   ├── models/                    # Qt Model 层
+        │   │   ├── __init__.py
+        │   │   └── table_models.py        # QAbstractTableModel 等
+        │   └── dialogs/                   # 弹窗/设置页
+        │       ├── __init__.py
+        │       └── settings_dialog.py     # 设置对话框
+        │
+        ├── core/                          # 核心业务层：纯算法、纯规则、无 UI、无 IO
+        │   ├── __init__.py
+        │   ├── evaluator.py               # 评定算法
+        │   ├── rules.py                   # 业务规则
+        │   └── scheduler.py               # 任务调度逻辑
+        │
+        ├── io/                            # 数据访问层：读取/写出/文件操作
+        │   ├── __init__.py
+        │   ├── input_handler.py           # 统一输入入口
+        │   ├── output_handler.py          # 统一输出入口
+        │   ├── excel_reader.py            # Excel 读取
+        │   ├── docx_writer.py             # Word 输出
+        │   └── file_manager.py            # 文件与目录操作
+        │
+        ├── models/                        # 数据契约层：统一内部数据结构
+        │   ├── __init__.py
+        │   └── schema.py                  # dataclass 定义
+        │
+        ├── config/                        # 配置加载层：读取、校验、合并默认值
+        │   ├── __init__.py
+        │   └── loader.py                  # config.yaml 加载器
+        │
+        ├── infra/                         # 基础设施层：通用能力，不放业务
+        │   ├── __init__.py
+        │   ├── logger.py                 # 日志系统
+        │   ├── paths.py                  # 路径统一管理
+        │   ├── time_utils.py             # 时间处理（建议带时区）
+        │   ├── exceptions.py             # 自定义异常
+        │   ├── validators.py             # 通用校验
+        │   └── helpers.py                # 零碎通用小工具
+        │
+        └── resources/                     # 静态资源目录
+            ├── icons/                     # 图标资源
+            ├── images/                    # 图片资源
+            └── styles/                    # 样式资源
+                └── qss/                   # Qt 样式表
+ 
+ ```
+ 
