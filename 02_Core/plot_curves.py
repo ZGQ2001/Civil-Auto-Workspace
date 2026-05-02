@@ -231,6 +231,36 @@ def preflight_check(template: Dict[str, Any], excel_columns: List[str]) -> Tuple
     return ok, "\n".join(lines)
 
 
+def generate_example_excel(template: Dict[str, Any], output_path: str, n_rows: int = 3) -> str:
+    """根据模板生成一份示例 Excel —— 列名与模板完全一致，里面填几行假数据。
+
+    给新人用：点一下就有标准格式的"模板答卷"，把自己的数据粘进去就能跑。
+    """
+    import pandas as pd
+
+    # 收集模板需要的所有列：标识列 + 各曲线的 var_column
+    cols: List[str] = [template["id_column"]]
+    for curve in template.get("curves", []):
+        for pt in curve.get("points", []):
+            c = pt.get("var_column")
+            if c and c not in cols:
+                cols.append(c)
+
+    # 假数据：标识列填 1..n_rows，其他列填一组合理的递增数字
+    sample_rows = []
+    for i in range(1, n_rows + 1):
+        row: Dict[str, Any] = {template["id_column"]: i}
+        # 用每个 var_column 的 fixed_value 比例做一个示意值
+        for j, col in enumerate(cols[1:], start=1):
+            row[col] = round(0.3 * j + i * 0.05, 2)
+        sample_rows.append(row)
+
+    df = pd.DataFrame(sample_rows, columns=cols)
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    df.to_excel(output_path, index=False)
+    return output_path
+
+
 def read_rows(excel_path: str, sheet_name: Optional[str], header_row_index: int = 0) -> List[Dict[str, Any]]:
     """读 Excel 一个 Sheet，返回每行的字典（key=表头）。
 
@@ -304,19 +334,55 @@ def _request_params(excel_path: str, sheet_names: List[str], template_names: Lis
     ).show()
 
 
+def _generate_example_flow(templates: Dict[str, Any]) -> None:
+    """走一遍"生成示例 Excel"的小流程：选模板 → 选输出位置 → 写文件。"""
+    from tkinter import filedialog
+    template_names = get_template_names(templates)
+
+    schema = [{
+        "key": "template_name", "label": "用哪个模板生成示例:",
+        "type": "select", "options": template_names,
+        "default": template_names[0],
+    }]
+    params = ModernDynamicFormDialog(
+        title="📋 生成示例 Excel - 选模板", form_schema=schema, width=520,
+    ).show()
+    if not params:
+        return
+
+    tpl_name = params.get("template_name") or template_names[0]
+    template = templates[tpl_name]
+    default_name = f"示例_{tpl_name}.xlsx"
+
+    output_path = filedialog.asksaveasfilename(
+        title="把示例 Excel 保存到哪里",
+        defaultextension=".xlsx",
+        initialfile=default_name,
+        filetypes=[("Excel 文件", "*.xlsx")],
+    )
+    if not output_path:
+        print("⚠️ 已取消：未选择输出位置。")
+        return
+
+    try:
+        generate_example_excel(template, output_path)
+    except Exception as e:
+        ModernInfoDialog("生成失败", str(e)).show()
+        return
+
+    msg = (
+        f"✅ 示例 Excel 已生成:\n{output_path}\n\n"
+        f"列名与模板 '{tpl_name}' 完全对应；\n"
+        f"把你自己的数据替换里面的示意值（一行 = 一张图），保存后再回来跑 [批量绘图] 即可。"
+    )
+    print(msg)
+    ModernInfoDialog("示例已生成", msg).show()
+
+
 def _main() -> None:
     enable_line_buffered_stdout()
 
-    excel_path = pick_excel_file(title="第一步：选择数据 Excel")
-    if not excel_path:
-        print("⚠️ 已取消：未选择 Excel 文件。")
-        return
-
-    sheets = read_sheet_names(excel_path)
-    if not sheets:
-        print("⚠️ 终止：该 Excel 没有可读取的工作表。")
-        return
-
+    # === 入口选择：① 用现有数据画图  ② 先生成一份示例 Excel ===
     try:
         templates = load_templates()
     except Exception as e:
@@ -328,6 +394,28 @@ def _main() -> None:
             "没有可用模板",
             f"请先打开 [曲线模板编辑器] 创建一个模板\n（也可手工编辑 {DEFAULT_TEMPLATES_PATH}）",
         ).show()
+        return
+
+    mode_dialog = ModernConfirmDialog(
+        title="批量绘图 - 选择工作模式",
+        message="想做什么？",
+        sub_message=(
+            "▶ 「确定执行」= 用我已有的 Excel 批量画图\n"
+            "✖ 「取消」     = 我还不知道列名格式，先帮我生成一份示例 Excel"
+        ),
+    )
+    if not mode_dialog.show():
+        _generate_example_flow(templates)
+        return
+
+    excel_path = pick_excel_file(title="第一步：选择数据 Excel")
+    if not excel_path:
+        print("⚠️ 已取消：未选择 Excel 文件。")
+        return
+
+    sheets = read_sheet_names(excel_path)
+    if not sheets:
+        print("⚠️ 终止：该 Excel 没有可读取的工作表。")
         return
 
     params = _request_params(excel_path, sheets, template_names)
@@ -357,12 +445,23 @@ def _main() -> None:
     print(report)
 
     if not ok:
-        ModernInfoDialog(
-            "列名对不上 - 请先修模板",
-            "模板里有列在你的 Excel 表头中找不到，详情请看主程序窗口的输出。\n\n"
-            "请打开 [曲线模板编辑器] 修正列名（推荐：在编辑器里打开同一个 Excel，"
-            "下拉选择实际列名而不是手工输入）。",
-        ).show()
+        # 把缺失列单独抽出来，放在弹窗里直接给用户看
+        col_map, missing = resolve_columns(template, excel_cols)
+        miss_text = "\n".join(f"  • {m}" for m in missing[:8])
+        if len(missing) > 8:
+            miss_text += f"\n  …还有 {len(missing) - 8} 个"
+        guide = (
+            f"❌ 模板 '{template_name}' 里有 {len(missing)} 个列在你的 Excel 表头里找不到：\n\n"
+            f"{miss_text}\n\n"
+            f"=== 怎么修？三选一 ===\n\n"
+            f"1️⃣ 推荐：回主控制台 → ⚙ 曲线模板 → 顶部「📂 挂载参考 Excel」选这个文件 →\n"
+            f"   每个点的「列名」字段就变成下拉选项 → 选 Excel 里实际的列名 → 保存 → 再来一次\n\n"
+            f"2️⃣ 反过来改 Excel 表头，让它跟模板列名一致（注意：含全/半角空格也要一致）\n\n"
+            f"3️⃣ 如果只想要一份「答卷格式」参考：\n"
+            f"   重新启动本工具 → 在第一个对话框点「取消」→ 选模板 → 生成示例 Excel"
+        )
+        print("\n" + guide)
+        ModernInfoDialog("列名对不上 - 看这里有 3 种修法", guide).show()
         return
 
     if not ModernConfirmDialog(

@@ -103,7 +103,7 @@ class CurveTemplateEditorPanel(ctk.CTkFrame):
     # ============== 布局 ==============
     def _build_layout(self) -> None:
         # 顶栏：路径 + Excel 挂载 + 保存
-        top = ctk.CTkFrame(self.root, fg_color="transparent")
+        top = ctk.CTkFrame(self, fg_color="transparent")
         top.pack(fill="x", padx=15, pady=(15, 5))
         ctk.CTkLabel(top, text=f"模板库：{self.path}", font=("微软雅黑", 11), text_color="gray50").pack(side="left")
         ctk.CTkButton(top, text="💾 保存", width=80, height=30, command=self._save).pack(side="right", padx=4)
@@ -113,7 +113,7 @@ class CurveTemplateEditorPanel(ctk.CTkFrame):
         ).pack(side="right", padx=4)
 
         # Excel 挂载条
-        excel_bar = ctk.CTkFrame(self.root)
+        excel_bar = ctk.CTkFrame(self)
         excel_bar.pack(fill="x", padx=15, pady=5)
         ctk.CTkButton(
             excel_bar, text="📂 挂载参考 Excel（让列名变下拉选择）",
@@ -125,7 +125,7 @@ class CurveTemplateEditorPanel(ctk.CTkFrame):
         self.excel_status.pack(side="left", padx=10)
 
         # 主体：左右分栏
-        body = ctk.CTkFrame(self.root, fg_color="transparent")
+        body = ctk.CTkFrame(self, fg_color="transparent")
         body.pack(fill="both", expand=True, padx=15, pady=10)
 
         # === 左侧：模板列表 ===
@@ -153,7 +153,7 @@ class CurveTemplateEditorPanel(ctk.CTkFrame):
         self.form_frame.pack(fill="both", expand=True, padx=15, pady=(0, 15))
 
         # 状态栏
-        self.status_bar = ctk.CTkLabel(self.root, text="就绪", font=("微软雅黑", 11), text_color="gray60", anchor="w")
+        self.status_bar = ctk.CTkLabel(self, text="就绪", font=("微软雅黑", 11), text_color="gray60", anchor="w")
         self.status_bar.pack(fill="x", padx=15, pady=(0, 10))
 
     # ============== 模板列表 ==============
@@ -190,7 +190,7 @@ class CurveTemplateEditorPanel(ctk.CTkFrame):
         self._render_form()
 
     def _new_template(self) -> None:
-        name = simpledialog.askstring("新建模板", "请输入新模板名称：", parent=self.root)
+        name = simpledialog.askstring("新建模板", "请输入新模板名称：", parent=self.winfo_toplevel())
         if not name:
             return
         if name in self.templates:
@@ -207,7 +207,7 @@ class CurveTemplateEditorPanel(ctk.CTkFrame):
             return
         name = simpledialog.askstring(
             "复制模板", f"基于 '{self.current_name}' 复制一份，新名称：",
-            parent=self.root, initialvalue=f"{self.current_name}_副本",
+            parent=self.winfo_toplevel(), initialvalue=f"{self.current_name}_副本",
         )
         if not name:
             return
@@ -506,7 +506,7 @@ class CurveTemplateEditorPanel(ctk.CTkFrame):
         else:
             sheet = simpledialog.askstring(
                 "选择工作表", f"可用 Sheet：{sheets}\n\n请输入要使用的 Sheet 名:",
-                parent=self.root, initialvalue=sheets[0],
+                parent=self.winfo_toplevel(), initialvalue=sheets[0],
             )
             if sheet not in sheets:
                 messagebox.showerror("Sheet 不存在", f"'{sheet}' 不在 {sheets} 中。")
@@ -547,13 +547,30 @@ class CurveTemplateEditorPanel(ctk.CTkFrame):
     def _set_status(self, text: str) -> None:
         self.status_bar.configure(text=text)
 
-    def _on_close(self) -> None:
+    def request_close(self) -> bool:
+        """让外层窗口关闭前问"是否放弃未保存"。返回是否真的可关。"""
         if self.dirty and not messagebox.askyesno("确认退出", "有未保存的修改，确定退出？"):
-            return
-        self.root.destroy()
+            return False
+        return True
+
+
+class CurveTemplateEditorApp:
+    """独立窗口模式：把 CurveTemplateEditorPanel 包在一个 CTk 窗口里。"""
+
+    def __init__(self, path: str = DEFAULT_TEMPLATES_PATH):
+        self._win = ctk.CTk()
+        self._win.title(f"曲线模板编辑器 - {os.path.basename(path)}")
+        self._win.geometry("1100x780")
+        self.panel = CurveTemplateEditorPanel(self._win, path=path)
+        self.panel.pack(fill="both", expand=True)
+        self._win.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _on_close(self) -> None:
+        if self.panel.request_close():
+            self._win.destroy()
 
     def run(self) -> None:
-        self.root.mainloop()
+        self._win.mainloop()
 
 
 def _main() -> None:
