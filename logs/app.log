@@ -1,0 +1,16 @@
+[2026-05-02 21:15:38] INFO   civil_auto.utils.logger — Logging initialized. dir=D:\01_VC CODE\Civil_Auto_Workspace\logs console=INFO file=DEBUG
+[2026-05-02 21:15:38] INFO   civil_auto.smoke       — logger ready; bridge type = QtLogBridge
+[2026-05-02 21:15:38] WARNING  civil_auto.smoke       — warning level test
+[2026-05-02 21:15:38] ERROR  civil_auto.smoke       — error level test
+[2026-05-02 21:16:28] INFO   civil_auto.utils.logger — Logging initialized. dir=D:\01_VC CODE\Civil_Auto_Workspace\logs console=INFO file=DEBUG
+[2026-05-02 21:16:28] INFO   civil_auto.smoke2      — Phase 2 smoke complete.
+[2026-05-02 21:32:00] INFO   civil_auto.utils.logger — Logging initialized. dir=D:\01_VC CODE\Civil_Auto_Workspace\logs console=INFO file=DEBUG
+[2026-05-02 21:32:05] INFO   stage1.smoke           — All foundation modules imported OK
+[2026-05-02 21:32:05] INFO   stage1.smoke           — Result dataclasses: BackupResult / PhotoScanResult / CaptionRenumberMapping OK
+[2026-05-02 21:32:05] INFO   stage1.smoke           — AppException subclasses: ['WordNotRunningError', 'DocumentNotSavedError', 'ConfigSchemaError', 'TemplateMissingError', 'IOReadError']
+[2026-05-02 21:32:05] INFO   stage1.smoke           — now_tz(): 2026-05-02 21:32:05.951164+08:00 tzname=CST
+[2026-05-02 21:32:05] INFO   stage1.smoke           — --- testing WordApp without running Word (should raise WordNotRunningError) ---
+[2026-05-02 21:32:06] INFO   stage1.smoke           — WordApp raised expected: 未检测到运行中的 Word/WPS 进程（最后一次尝试失败：(-2147221005, '无效的类字符串', None, None)） | hint=请先打开 Word 或 WPS，并打开目标文档（保存到本地）后重试。
+[2026-05-02 21:32:06] ERROR  civil_auto.io.io_helpers — Excel 文件不存在: \no\such\file.xlsx
+[2026-05-02 21:32:06] INFO   stage1.smoke           — read_sheet_names on missing file -> [] (good)
+[2026-05-02 21:32:06] INFO   stage1.smoke           — open_workbook raised expected IOReadError: Excel 文件不存在: \nope.xlsx

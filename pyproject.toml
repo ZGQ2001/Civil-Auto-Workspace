@@ -1,43 +1,94 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "civil-auto-workspace"
-version = "0.1.0"
-description = "Add your description here"
+version = "1.0.0"
+description = "桥梁/土建检测报告自动化工作台 — PySide6 + qfluentwidgets"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = [
-    "customtkinter==5.2.2",
-    "darkdetect==0.8.0",
-    "et-xmlfile==2.0.0",
-    "handright==8.2.0",
-    "lxml==6.1.0",
-    "matplotlib==3.10.9",
-    "numpy==2.4.4",
-    "openpyxl==3.1.5",
-    "packaging==26.0",
-    "pandas==3.0.2",
-    "pillow==10.4.0",
-    "pip==25.0.1",
-    "pymupdf==1.27.2.2",
-    "pypdf==6.9.2",
-    "pyside6>=6.11.0",
-    "python-dateutil==2.9.0.post0",
-    "python-docx==1.2.0",
-    "pywin32==311",
-    "six==1.17.0",
-    "typing-extensions==4.15.0",
-    "tzdata==2026.1",
+license = { text = "Proprietary" }
+authors = [
+    { name = "ZGQ" },
 ]
+keywords = ["civil-engineering", "automation", "word-com", "fluent-ui"]
+
+dependencies = [
+    # UI
+    "PySide6>=6.7,<7.0",
+    "PySide6-Fluent-Widgets>=1.7.0",
+    # Config & validation
+    "PyYAML>=6.0",
+    "pydantic>=2.5",
+    # Office automation
+    "pywin32>=306",
+    "python-docx==1.2.0",
+    "openpyxl==3.1.5",
+    # Data
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "matplotlib>=3.9",
+    # PDF / image
+    "pymupdf>=1.24",
+    "pypdf>=4.0",
+    "pillow>=10.4",
+    "handright==8.2.0",
+    # Utils
+    "lxml>=5.0",
+    "python-dateutil>=2.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-qt>=4.4",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+civil-auto = "civil_auto.main:main"
+
+# ── 包发现：src/ 布局 ─────────────────────────────────────────────
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+civil_auto = ["py.typed"]
+
+# ── Pyright / Pylance ────────────────────────────────────────────
 [tool.pyright]
-# 必须显式写出 Pylance 期待的几个名字，它才会停止报 missingDefaultExcludes
+include = ["src", "tests"]
 exclude = [
     "**/node_modules",
     "**/__pycache__",
-    "**/.venv",        # 必须显式加上这一行
-    "**/.*",           # 涵盖其他隐藏文件夹
-    "temp",            # 结尾记得加逗号
-    "out"              # 结尾记得加逗号
+    "**/.venv",
+    "**/.*",
+    "data",
+    "logs",
+    "templates",
+    "02_Core",          # legacy customtkinter code, retained until migration done
+    "00_使用手册",
+    "99_old_JSA",
 ]
-
 executionEnvironments = [
-  { root = "." }
+    { root = "src" },
 ]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+
+# ── Ruff（轻量 lint + format） ────────────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N", "RUF"]
+ignore = ["E501"]
+
+# ── pytest ───────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q --strict-markers"
